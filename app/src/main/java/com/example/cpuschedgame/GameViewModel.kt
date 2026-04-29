@@ -38,8 +38,11 @@ class GameViewModel : ViewModel() {
     var wrongPicks       by mutableIntStateOf(0);   private set
     /** PID of the last wrong-picked process, cleared after a short window. */
     var lastWrongPid     by mutableStateOf<Int?>(null); private set
+    /** True when the player cleared all processes without running out of lives. */
+    var isGameWon        by mutableStateOf(false);  private set
 
     // ── Private fields ────────────────────────────────────────────
+    private val MAX_PROCESSES   = 15
     private var cpuTimer        = 0f
     private var spawnWallTimer  = 0f
     private var spawnWallInterval = 2.5f
@@ -147,7 +150,7 @@ class GameViewModel : ViewModel() {
         spawnWallTimer += delta
 
         // ── Spawn new processes on wall-time interval ──────────────
-        if (spawnWallTimer >= spawnWallInterval) {
+        if (spawnWallTimer >= spawnWallInterval && pidCounter <= MAX_PROCESSES) {
             spawnWallTimer    = 0f
             spawnWallInterval = (20..55).random() / 10f
             // Occasionally arrive immediately; mostly arrive a few scheduling units ahead
@@ -199,8 +202,12 @@ class GameViewModel : ViewModel() {
 
                 updateAvailability()
                 autoAdvanceIfIdle()
+                checkWinCondition()
             }
-        } ?: autoAdvanceIfIdle()  // also run when CPU becomes idle immediately
+        } ?: run {
+            autoAdvanceIfIdle()  // also run when CPU becomes idle immediately
+            checkWinCondition()
+        }
     }
 
     /**
@@ -214,6 +221,23 @@ class GameViewModel : ViewModel() {
         if (nextArrival > schedulingTime) {
             schedulingTime = nextArrival
             updateAvailability()
+        }
+    }
+
+    /**
+     * End the game with a win if all processes are spawned, none are pending or waiting,
+     * and the CPU is idle.
+     */
+    private fun checkWinCondition() {
+        if (isGameOver) return
+        val allSpawned = pidCounter > MAX_PROCESSES
+        val allClear   = runningProcess == null &&
+                waitingProcesses.isEmpty() &&
+                pendingProcesses.isEmpty()
+        if (allSpawned && allClear) {
+            isGameWon  = true
+            isGameOver = true
+            gameJob?.cancel()
         }
     }
 
@@ -265,7 +289,7 @@ class GameViewModel : ViewModel() {
         runningProcess    = null
         score             = 0; lives = 3
         wallTime          = 0f; schedulingTime = 0
-        isGameOver        = false; isPaused = false; showAlgoIntro = true
+        isGameOver        = false; isGameWon = false; isPaused = false; showAlgoIntro = true
         cpuTimer          = 0f; cpuBurstProgress = 0f; cpuRemainingBurst = 0
         spawnWallTimer    = 0f; spawnWallInterval = 2.5f
         pidCounter        = 1; correctPicks = 0; wrongPicks = 0

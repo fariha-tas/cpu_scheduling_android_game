@@ -22,6 +22,7 @@ import com.example.cpuschedgame.ui.theme.*
 @Composable
 fun ResultScreen(
     score: Int,
+    isGameWon: Boolean = false,
     completedCount: Int,
     correctPicks: Int,
     wrongPicks: Int,
@@ -74,7 +75,7 @@ fun ResultScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("GAME OVER", color = TextSecondary, fontSize = 12.sp, letterSpacing = 4.sp)
+            Text(if (isGameWon) "MISSION COMPLETE" else "GAME OVER", color = if (isGameWon) GreenBright else TextSecondary, fontSize = 12.sp, letterSpacing = 4.sp)
 
             // Rating badge
             Box(

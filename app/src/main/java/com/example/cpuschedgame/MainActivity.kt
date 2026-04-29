@@ -64,6 +64,7 @@ fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
         composable("result") {
             ResultScreen(
                 score          = vm.score,
+                isGameWon      = vm.isGameWon,
                 completedCount = vm.completedProcesses.size,
                 correctPicks   = vm.correctPicks,
                 wrongPicks     = vm.wrongPicks,
