@@ -23,24 +23,29 @@ import com.example.cpuschedgame.ui.theme.*
 fun ResultScreen(
     score: Int,
     completedCount: Int,
+    correctPicks: Int,
+    wrongPicks: Int,
     timeElapsed: Float,
     algorithm: SchedulingAlgorithm,
     onPlayAgain: () -> Unit,
     onHome: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val totalPicks = correctPicks + wrongPicks
+    val accuracy   = if (totalPicks > 0) (correctPicks * 100 / totalPicks) else 0
+
     val (ratingLabel, ratingColor) = when {
-        score >= 800 -> "S" to GoldenBright
-        score >= 600 -> "A" to GreenBright
-        score >= 400 -> "B" to InfoBlue
-        score >= 200 -> "C" to WarningOrange
-        else         -> "D" to DangerRed
+        accuracy >= 90 && score >= 600 -> "S" to GoldenBright
+        accuracy >= 75 || score >= 450 -> "A" to GreenBright
+        accuracy >= 60 || score >= 300 -> "B" to InfoBlue
+        accuracy >= 40 || score >= 150 -> "C" to WarningOrange
+        else                           -> "D" to DangerRed
     }
 
     val pulseBadge by rememberInfiniteTransition(label = "badge").animateFloat(
         initialValue = 1f, targetValue = 1.06f,
         animationSpec = infiniteRepeatable(tween(900, easing = EaseInOutSine), RepeatMode.Reverse),
-        label = "badgeScale"
+        label = "scale"
     )
 
     Box(
@@ -65,12 +70,13 @@ fun ResultScreen(
                 .fillMaxWidth()
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(28.dp),
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text("GAME OVER", color = TextSecondary, fontSize = 12.sp, letterSpacing = 4.sp)
 
+            // Rating badge
             Box(
                 modifier = Modifier
                     .size(82.dp)
@@ -82,11 +88,13 @@ fun ResultScreen(
                 Text(ratingLabel, color = ratingColor, fontSize = 42.sp, fontWeight = FontWeight.Bold)
             }
 
+            // Score
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("$score", color = GoldenBright, fontSize = 58.sp, fontWeight = FontWeight.Bold)
+                Text("$score", color = GoldenBright, fontSize = 56.sp, fontWeight = FontWeight.Bold)
                 Text("POINTS", color = TextSecondary, fontSize = 11.sp, letterSpacing = 4.sp)
             }
 
+            // Main stats row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -95,9 +103,60 @@ fun ResultScreen(
                     .padding(16.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                StatItem("$completedCount", "COMPLETED", GreenBright)
+                StatItem("$completedCount", "DONE", GreenBright)
                 StatItem("${timeElapsed.toInt()}s", "TIME", InfoBlue)
-                StatItem(algorithm.shortName, "ALGORITHM", GoldenLight)
+                StatItem(algorithm.shortName, "ALGO", GoldenLight)
+            }
+
+            // Accuracy panel
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(DarkCard, RoundedCornerShape(8.dp))
+                    .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "SCHEDULING ACCURACY",
+                    color = TextSecondary, fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp
+                )
+
+                // Accuracy bar
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        "$accuracy%",
+                        color = if (accuracy >= 75) GreenBright else if (accuracy >= 50) WarningOrange else DangerRed,
+                        fontSize = 26.sp, fontWeight = FontWeight.Bold
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth().height(8.dp)
+                                .background(DarkBg, RoundedCornerShape(4.dp))
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(accuracy / 100f).fillMaxHeight()
+                                    .background(
+                                        if (accuracy >= 75) GreenBright
+                                        else if (accuracy >= 50) WarningOrange
+                                        else DangerRed,
+                                        RoundedCornerShape(4.dp)
+                                    )
+                            )
+                        }
+                        Spacer(Modifier.height(3.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("✓ $correctPicks correct", color = GreenBright, fontSize = 10.sp)
+                            Text("✗ $wrongPicks wrong", color = DangerRed, fontSize = 10.sp)
+                        }
+                    }
+                }
             }
 
             // Algorithm lesson
@@ -106,7 +165,7 @@ fun ResultScreen(
                     .fillMaxWidth()
                     .background(DarkCard, RoundedCornerShape(8.dp))
                     .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
-                    .padding(14.dp),
+                    .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
@@ -124,21 +183,21 @@ fun ResultScreen(
 
             Button(
                 onClick = onPlayAgain,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = GreenAccent, contentColor = TextPrimary)
             ) {
-                Text("▶  PLAY AGAIN", fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Text("▶  PLAY AGAIN", fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
             }
 
             OutlinedButton(
                 onClick = onHome,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(8.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
             ) {
-                Text("⌂  HOME", fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Text("⌂  HOME", fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
             }
         }
     }
@@ -157,7 +216,9 @@ private fun StatItem(value: String, label: String, color: Color) {
 fun ResultPreview() {
     com.example.cpuschedgame.ui.theme.CPUSchedGameTheme {
         ResultScreen(
-            score = 720, completedCount = 8, timeElapsed = 65f,
+            score = 720, completedCount = 8,
+            correctPicks = 7, wrongPicks = 2,
+            timeElapsed = 65f,
             algorithm = SchedulingAlgorithm.SJF,
             onPlayAgain = {}, onHome = {}
         )

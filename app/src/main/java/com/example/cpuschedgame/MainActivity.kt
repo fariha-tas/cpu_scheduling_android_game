@@ -32,25 +32,16 @@ fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
 
         composable("home") {
             HomeScreen(
-                onStartGameClick = { navController.navigate("select_algorithm") },
-                onHowToPlayClick  = { navController.navigate("howtoplay") }
+                onStartGameClick = {
+                    vm.startGame()
+                    navController.navigate("game") { popUpTo("home") }
+                },
+                onHowToPlayClick = { navController.navigate("howtoplay") }
             )
         }
 
         composable("howtoplay") {
             HowToPlayScreen(onBackClick = { navController.popBackStack() })
-        }
-
-        composable("select_algorithm") {
-            AlgorithmSelectScreen(
-                selectedAlgorithm  = vm.selectedAlgorithm,
-                onAlgorithmSelected = vm::selectAlgorithm,
-                onStartGame = {
-                    vm.startGame()
-                    navController.navigate("game") { popUpTo("home") }
-                },
-                onBackClick = { navController.popBackStack() }
-            )
         }
 
         composable("game") {
@@ -72,12 +63,15 @@ fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
 
         composable("result") {
             ResultScreen(
-                score               = vm.score,
-                completedCount      = vm.completedProcesses.size,
-                timeElapsed         = vm.timeElapsed,
-                algorithm           = vm.selectedAlgorithm,
+                score          = vm.score,
+                completedCount = vm.completedProcesses.size,
+                correctPicks   = vm.correctPicks,
+                wrongPicks     = vm.wrongPicks,
+                timeElapsed    = vm.wallTime,
+                algorithm      = vm.assignedAlgorithm,
                 onPlayAgain = {
-                    navController.navigate("select_algorithm") { popUpTo("home") }
+                    vm.startGame()
+                    navController.navigate("game") { popUpTo("home") }
                 },
                 onHome = {
                     navController.navigate("home") {
