@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.cpuschedgame.ui.theme.*
 import kotlinx.coroutines.delay
+
 
 @Composable
 fun GameScreen(
@@ -36,6 +38,7 @@ fun GameScreen(
         }
     }
 
+    val context = LocalContext.current
     val optimalPid by remember { derivedStateOf { viewModel.getOptimalPid() } }
 
     Box(
@@ -67,7 +70,9 @@ fun GameScreen(
                 optimalPid   = optimalPid,
                 wrongPid     = viewModel.lastWrongPid,
                 cpuBusy      = viewModel.runningProcess != null,
-                onSchedule   = viewModel::scheduleProcess,
+                onSchedule = { process ->
+                    viewModel.scheduleProcess(process, context)
+                },
                 modifier     = Modifier.weight(1f)
             )
 
@@ -145,18 +150,22 @@ private fun AlgoIntroOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(DarkBg.copy(alpha = 0.96f)),
+            .background(DarkBg.copy(alpha = 0.96f))
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.92f)
                 .padding(28.dp)
                 .background(DarkCard, RoundedCornerShape(16.dp))
                 .border(1.5.dp, GoldenBright.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
-                .padding(24.dp),
+                .padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text("YOUR ALGORITHM", color = TextSecondary, fontSize = 10.sp, letterSpacing = 3.sp)
 
@@ -180,53 +189,95 @@ private fun AlgoIntroOverlay(
 
             HorizontalDivider(color = DarkBorder, thickness = 1.dp)
 
-            // What to do
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(GreenAccent.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                    .border(1.dp, GreenAccent.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text("WHAT TO DO", color = GreenBright, fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-                Spacer(Modifier.height(2.dp))
-                Text(algorithm.hint, color = TextPrimary, fontSize = 13.sp, lineHeight = 20.sp)
+            Column(modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())){
+                // What to do & Penalty Reminder
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                GreenAccent.copy(alpha = 0.1f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .border(
+                                1.dp,
+                                GreenAccent.copy(alpha = 0.4f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            "WHAT TO DO",
+                            color = GreenBright,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 2.sp
+                        )
+
+                        Spacer(Modifier.height(2.dp))
+
+                        Text(
+                            algorithm.hint,
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            lineHeight = 20.sp
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Text(
+                        algorithm.detail,
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 17.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Penalty box
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                DangerRed.copy(alpha = 0.08f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .border(
+                                1.dp,
+                                DangerRed.copy(alpha = 0.4f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("⚠", color = DangerRed, fontSize = 14.sp)
+
+                        Text(
+                            "Wrong pick or Expired Process = −1 ❤ & −50 pts",
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            lineHeight = 17.sp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
             }
-
-            Text(
-                algorithm.detail,
-                color = TextSecondary, fontSize = 11.sp,
-                lineHeight = 17.sp, textAlign = TextAlign.Center
-            )
-
-            // Penalty reminder
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(DangerRed.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
-                    .border(1.dp, DangerRed.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                    .padding(10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("⚠", color = DangerRed, fontSize = 14.sp)
-                Text(
-                    "Wrong pick = −1 life & −50 pts\nExpired process = −1 life & −50 pts",
-                    color = TextSecondary, fontSize = 11.sp, lineHeight = 17.sp
-                )
-            }
-
-            Spacer(Modifier.height(4.dp))
 
             Button(
                 onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = GoldenBright, contentColor = DarkBg)
             ) {
-                Text("▶  START SCHEDULING", fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("▶  START SCHEDULING", fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             }
         }
     }
@@ -240,6 +291,7 @@ private fun GameHUD(
     algo: SchedulingAlgorithm, isPaused: Boolean,
     onPause: () -> Unit, onBack: () -> Unit
 ) {
+    var showExitDialog by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -248,7 +300,8 @@ private fun GameHUD(
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        TextButton(onClick = onBack, contentPadding = PaddingValues(6.dp)) {
+        TextButton(onClick = { showExitDialog = true },
+            contentPadding = PaddingValues(6.dp)) {
             Text("✕", color = DangerRed, fontSize = 16.sp)
         }
 
@@ -293,13 +346,43 @@ private fun GameHUD(
             Text(if (isPaused) "▶" else "⏸", color = TextPrimary, fontSize = 16.sp)
         }
     }
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            title = {
+                Text("Exit Game?")
+            },
+            text = {
+                Text("Do you want to go back? Game progress will be lost.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showExitDialog = false
+                        onBack()   // actually go back
+                    }
+                ) {
+                    Text("Yes")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showExitDialog = false // Close dialog
+                    }
+                ) {
+                    Text("No")
+                }
+            }
+        )
+    }
 }
 
 // ── Algorithm Hint Bar ────────────────────────────────────────────
 
 @Composable
 private fun AlgoHintBar(algorithm: SchedulingAlgorithm) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(GoldenBright.copy(alpha = 0.06f))
@@ -307,17 +390,32 @@ private fun AlgoHintBar(algorithm: SchedulingAlgorithm) {
                 width = 0.dp,
                 color = Color.Transparent
             )
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        Text("★", color = GoldenBright, fontSize = 12.sp)
+
+        // First line: hint
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("★", color = GoldenBright, fontSize = 12.sp)
+
+            Text(
+                algorithm.hintShort,
+                color = GoldenLight,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
+            )
+        }
+
+        // Second line: penalty text
         Text(
-            algorithm.hintShort,
-            color = GoldenLight, fontSize = 11.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp
+            "Wrong Pick = −♥ and -50 Score",
+            color = DangerRed.copy(alpha = 0.8f),
+            fontSize = 10.sp,
+            modifier = Modifier.padding(start = 20.dp)
         )
-        Text("  |  wrong pick = −♥", color = DangerRed.copy(alpha = 0.8f), fontSize = 10.sp)
     }
 }
 
@@ -510,9 +608,9 @@ private fun ProcessCard(
         isWrong -> DangerRed
         else    -> DarkBorder
     }
-    val borderWidth = if (isWrong) 1.5.dp else 1.dp
+    val borderWidth = if (isWrong) 3.dp else 1.dp
     val bgColor     = when {
-        isWrong -> DangerRed.copy(alpha = 0.06f)
+        isWrong -> DangerRed.copy(alpha = 0.22f)
         else    -> DarkCard
     }
 
@@ -543,7 +641,7 @@ private fun ProcessCard(
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                if (isWrong) Text("✗", color = DangerRed, fontSize = 11.sp)
+                if (isWrong) Text("✗", color = DangerRed, fontSize = 18.sp)
             }
 
             Spacer(Modifier.height(4.dp))

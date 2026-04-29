@@ -1,5 +1,7 @@
 package com.example.cpuschedgame
 
+import android.content.Context
+import android.media.MediaPlayer
 import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,6 +31,7 @@ class GameViewModel : ViewModel() {
     // ── Game state ────────────────────────────────────────────────
     var score            by mutableIntStateOf(0);   private set
     var lives            by mutableIntStateOf(3);   private set
+    var hasGameStarted   by mutableStateOf(false);  private set
     var isGameOver       by mutableStateOf(false);  private set
     var isPaused         by mutableStateOf(false);  private set
     var showAlgoIntro    by mutableStateOf(true);   private set
@@ -58,7 +61,9 @@ class GameViewModel : ViewModel() {
     // ── Public API ────────────────────────────────────────────────
 
     fun startGame() {
+
         resetState()
+        hasGameStarted = true
         // Non-preemptive only: FCFS, SJF, Priority
         assignedAlgorithm = listOf(
             SchedulingAlgorithm.FCFS,
@@ -72,9 +77,9 @@ class GameViewModel : ViewModel() {
 
         gameJob?.cancel()
         gameJob = viewModelScope.launch {
-            while (isActive) {
+            while (isActive && hasGameStarted) {
                 delay(100L)
-                if (!isPaused && !isGameOver) tick(0.1f)
+                if (!isPaused && !isGameOver && !showAlgoIntro) tick(0.1f)
             }
         }
     }
@@ -83,8 +88,9 @@ class GameViewModel : ViewModel() {
      * Player taps a process card. Non-preemptive: if CPU is busy, the tap is ignored.
      * Correctness is evaluated against the current algorithm's rule.
      */
-    fun scheduleProcess(process: Process) {
-        if (isGameOver || isPaused) return
+    fun scheduleProcess(process: Process,  context: Context) {
+
+        if (isGameOver || isPaused || showAlgoIntro || !hasGameStarted) return
         if (runningProcess != null) return          // CPU busy — non-preemptive
         if (waitingProcesses.none { it.pid == process.pid }) return
 
@@ -92,9 +98,13 @@ class GameViewModel : ViewModel() {
         val isCorrect  = optimalPid == null || process.pid == optimalPid
 
         if (isCorrect) {
+            playSound(context, R.raw.correct)
             correctPicks++
             score += computeScore(process)
+            waitingProcesses.removeAll { it.pid == process.pid }
+            runningProcess    = process.copy(state = ProcessState.RUNNING)
         } else {
+            playSound(context, R.raw.wrong)
             wrongPicks++
             lives = maxOf(0, lives - 1)
             score = maxOf(0, score - 50)
@@ -102,7 +112,7 @@ class GameViewModel : ViewModel() {
             lastWrongPid = process.pid
             wrongFlashJob?.cancel()
             wrongFlashJob = viewModelScope.launch {
-                delay(900L)
+                delay(500L)
                 lastWrongPid = null
             }
             if (lives == 0) {
@@ -112,13 +122,18 @@ class GameViewModel : ViewModel() {
             }
         }
 
-        waitingProcesses.removeAll { it.pid == process.pid }
-        runningProcess    = process.copy(state = ProcessState.RUNNING)
         cpuTimer          = 0f
         cpuRemainingBurst = process.burstTime
         cpuBurstProgress  = 0f
     }
 
+    fun playSound(context: Context, soundRes: Int) {
+        val mediaPlayer = MediaPlayer.create(context, soundRes)
+        mediaPlayer.setOnCompletionListener {
+            it.release()
+        }
+        mediaPlayer.start()
+    }
     fun dismissAlgoIntro() { showAlgoIntro = false }
     fun togglePause()       { isPaused = !isPaused }
     fun stopGame()          { gameJob?.cancel(); isGameOver = true }
@@ -289,6 +304,7 @@ class GameViewModel : ViewModel() {
         runningProcess    = null
         score             = 0; lives = 3
         wallTime          = 0f; schedulingTime = 0
+        hasGameStarted    = false
         isGameOver        = false; isGameWon = false; isPaused = false; showAlgoIntro = true
         cpuTimer          = 0f; cpuBurstProgress = 0f; cpuRemainingBurst = 0
         spawnWallTimer    = 0f; spawnWallInterval = 2.5f
