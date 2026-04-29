@@ -17,9 +17,9 @@ import androidx.compose.ui.unit.sp
 import com.example.cpuschedgame.ui.theme.*
 
 @Composable
-fun AlgorithmSelectScreen(
-    selectedAlgorithm: SchedulingAlgorithm,
-    onAlgorithmSelected: (SchedulingAlgorithm) -> Unit,
+fun LevelSelectScreen(
+    selectedLevel: Level,
+    onSelectLevel: (Level) -> Unit,
     onStartGame: () -> Unit,
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -54,13 +54,13 @@ fun AlgorithmSelectScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                "Choose how processes are scheduled. Each algorithm has different optimal play.",
+                "Choose what level you want to play!",
                 color = TextSecondary, fontSize = 12.sp,
                 modifier = Modifier.padding(bottom = 4.dp)
             )
 
-            SchedulingAlgorithm.values().forEach { algo ->
-                val selected = algo == selectedAlgorithm
+            Level.values().forEach { level ->
+                val selected = level == selectedLevel
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -71,7 +71,7 @@ fun AlgorithmSelectScreen(
                             color  = if (selected) GoldenBright else DarkBorder,
                             shape  = RoundedCornerShape(8.dp)
                         )
-                        .clickable { onAlgorithmSelected(algo) }
+                        .clickable { onSelectLevel(level) }
                         .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -92,7 +92,7 @@ fun AlgorithmSelectScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            algo.shortName,
+                            level.displayName,
                             color = if (selected) GoldenBright else TextSecondary,
                             fontSize = 12.sp, fontWeight = FontWeight.Bold
                         )
@@ -100,13 +100,13 @@ fun AlgorithmSelectScreen(
 
                     Column(Modifier.weight(1f)) {
                         Text(
-                            algo.displayName.replace("\n", " "),
+                            level.displayName.replace("\n", " "),
                             color = if (selected) TextPrimary else TextSecondary,
                             fontSize = 14.sp, fontWeight = FontWeight.Bold
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            algo.description,
+                            level.description,
                             color = TextSecondary, fontSize = 11.sp, lineHeight = 16.sp
                         )
                     }
@@ -133,7 +133,7 @@ fun AlgorithmSelectScreen(
                 )
             ) {
                 Text(
-                    "▶  START  [ ${selectedAlgorithm.shortName} ]",
+                    "▶  START  [ ${selectedLevel.displayName} ]",
                     fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp
                 )
             }
@@ -141,13 +141,13 @@ fun AlgorithmSelectScreen(
     }
 }
 
-@Preview(showBackground = true, widthDp = 360, heightDp = 780)
-@Composable
-fun AlgorithmSelectPreview() {
-    com.example.cpuschedgame.ui.theme.CPUSchedGameTheme {
-        AlgorithmSelectScreen(
-            selectedAlgorithm = SchedulingAlgorithm.SJF_NP,
-            onAlgorithmSelected = {}, onStartGame = {}, onBackClick = {}
-        )
-    }
-}
+//@Preview(showBackground = true, widthDp = 360, heightDp = 780)
+//@Composable
+//fun LevelSelectScreenPreview() {
+//    com.example.cpuschedgame.ui.theme.CPUSchedGameTheme {
+//        LevelSelectScreen(
+//            selectedLevel = Level.Easy,
+//            onLevelSelected = {}, onStartGame = {}, onBackClick = {},
+//        )
+//    }
+//}

@@ -1,15 +1,22 @@
 package com.example.cpuschedgame
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.cpuschedgame.ui.theme.CPUSchedGameTheme
 
 class MainActivity : ComponentActivity() {
@@ -33,10 +40,28 @@ fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
         composable("home") {
             HomeScreen(
                 onStartGameClick = {
-                    vm.startGame()
-                    navController.navigate("game") { popUpTo("home") }
+                    navController.navigate("levelselect") { popUpTo("home") }
                 },
                 onHowToPlayClick = { navController.navigate("howtoplay") }
+            )
+        }
+
+        composable("levelselect"){
+            var selectedLevel by remember { mutableStateOf(Level.Easy) }
+
+            LevelSelectScreen(
+                selectedLevel = selectedLevel,
+                onSelectLevel = { level ->
+                    selectedLevel = level
+                },
+                onStartGame = {
+                    navController.navigate("game/${selectedLevel.name}") {
+                        popUpTo("home")
+                    }
+                },
+                onBackClick = {
+                    navController.popBackStack()
+                }
             )
         }
 
@@ -44,12 +69,25 @@ fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
             HowToPlayScreen(onBackClick = { navController.popBackStack() })
         }
 
-        composable("game") {
+        composable(
+            route = "game/{level}",
+            arguments = listOf(
+                navArgument("level") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+
+            val levelName = backStackEntry.arguments?.getString("level") ?: Level.Easy.name
+            val level = Level.valueOf(levelName)
+
+            LaunchedEffect(level) {
+                vm.startGame(level)
+            }
+
             GameScreen(
                 viewModel = vm,
                 onGameOver = {
                     navController.navigate("result") {
-                        popUpTo("game") { inclusive = true }
+                        popUpTo("game/{level}") { inclusive = true }
                     }
                 },
                 onBackClick = {
@@ -69,10 +107,11 @@ fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
                 correctPicks   = vm.correctPicks,
                 wrongPicks     = vm.wrongPicks,
                 timeElapsed    = vm.wallTime,
-                algorithm      = vm.assignedAlgorithm,
+                algorithm = vm.assignedAlgorithm ?: SchedulingAlgorithm.FCFS,
                 onPlayAgain = {
-                    vm.startGame()
-                    navController.navigate("game") { popUpTo("home") }
+                    navController.navigate("game/${vm.selectedLevel.name}") {
+                        popUpTo("result") { inclusive = true }
+                    }
                 },
                 onHome = {
                     navController.navigate("home") {

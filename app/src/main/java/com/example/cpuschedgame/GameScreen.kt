@@ -20,8 +20,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.cpuschedgame.ui.theme.*
 import kotlinx.coroutines.delay
+
 
 
 @Composable
@@ -38,6 +40,7 @@ fun GameScreen(
         }
     }
 
+    val level = viewModel.selectedLevel
     val context = LocalContext.current
     val optimalPid by remember { derivedStateOf { viewModel.getOptimalPid() } }
 

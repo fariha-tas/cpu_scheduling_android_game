@@ -18,6 +18,20 @@ enum class ProcessType(val label: String) {
 
 enum class ProcessState { WAITING, RUNNING, COMPLETED }
 
+enum class Level(
+    val displayName: String,
+    val description: String
+) {
+    Easy(
+        displayName = "Easy Level",
+        description = "Non-preemptive Algorithm : Once a process is in the CPU queue, you cannot remove it. It will be automatically removed after completion!"
+    ),
+    Hard(
+        displayName = "Hard Level",
+        description = "Preemptive Algorithm: You can remove processes from CPU mid-execution and send next most suitable process to increase efficiency of CPU!"
+    )
+}
+
 enum class SchedulingAlgorithm(
     val shortName: String,
     val displayName: String,
@@ -35,8 +49,8 @@ enum class SchedulingAlgorithm(
         hint        = "Pick the process that ARRIVED EARLIEST (lowest AT value)",
         hintShort   = "Pick LOWEST Arrival Time (AT)"
     ),
-    SJF(
-        shortName   = "SJF",
+    SJF_NP(
+        shortName   = "SJF-NP",
         displayName = "Shortest Job\nFirst",
         description = "Pick the shortest burst time first",
         detail      = "Gives optimal average waiting time. Schedule the process with the " +
@@ -44,8 +58,8 @@ enum class SchedulingAlgorithm(
         hint        = "Pick the process with the SMALLEST burst time (BT)",
         hintShort   = "Pick SMALLEST Burst Time (BT)"
     ),
-    PRIORITY(
-        shortName   = "PRI",
+    PRIORITY_NP(
+        shortName   = "PRI-NP",
         displayName = "Priority\nScheduling",
         description = "Execute highest priority (P1) first",
         detail      = "Each process has a priority 1–5 where 1 is the highest. " +
@@ -53,14 +67,34 @@ enum class SchedulingAlgorithm(
         hint        = "Pick the process with the LOWEST priority number (P1 is most urgent)",
         hintShort   = "Pick LOWEST Priority number (P1 first)"
     ),
-    ROUND_ROBIN(  // kept for compile compat; not used in random pool
+    ROUND_ROBIN(
         shortName   = "RR",
         displayName = "Round\nRobin",
         description = "Each process gets an equal time slice",
         detail      = "Fair CPU sharing via time quantum. No starvation.",
         hint        = "Pick any process — Round Robin is fair!",
         hintShort   = "Any order is fine"
-    )
+    ),
+    SJF_P(
+        shortName   = "SJF-P",
+        displayName = "Shortest Job\nFirst",
+        description = "Pick the shortest burst time first. Can remove process mid-execution!",
+        detail      = "Gives optimal average waiting time. Schedule the process with the " +
+                        "smallest burst time. Long processes may starve if short ones keep arriving.",
+        hint        = "Pick the process with the SMALLEST burst time (BT)." +
+                        " Processes can be removed mid-execution!",
+        hintShort   = "Pick SMALLEST Burst Time (BT)" + "\nProcesses can be removed mid-execution!"
+    ),
+    PRIORITY_P(
+        shortName   = "PRI-P",
+        displayName = "Priority\nScheduling",
+        description = "Execute highest priority (P1) first. Can remove process mid-execution!",
+        detail      = "Each process has a priority 1–5 where 1 is the highest. " +
+                        "Always run the most critical process first. Risk of starvation for P5 processes.",
+        hint        = "Pick the process with the LOWEST priority number (P1 is most urgent)."
+                        + " Processes can be removed mid-execution!",
+        hintShort   = "Pick LOWEST Priority number (P1 first)" + "\nProcesses can be removed mid-execution!"
+    ),
 }
 
 data class GanttEntry(

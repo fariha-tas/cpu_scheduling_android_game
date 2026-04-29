@@ -220,7 +220,7 @@ fun ResultPreview() {
             score = 720, completedCount = 8,
             correctPicks = 7, wrongPicks = 2,
             timeElapsed = 65f,
-            algorithm = SchedulingAlgorithm.SJF,
+            algorithm = SchedulingAlgorithm.SJF_NP,
             onPlayAgain = {}, onHome = {}
         )
     }
