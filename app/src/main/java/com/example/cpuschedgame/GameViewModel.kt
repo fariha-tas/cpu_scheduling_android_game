@@ -42,7 +42,7 @@ class GameViewModel : ViewModel() {
     var isGameWon        by mutableStateOf(false);  private set
 
     // ── Private fields ────────────────────────────────────────────
-    private val MAX_PROCESSES   = 15
+    private val MAX_PROCESSES   = 10
     private var cpuTimer        = 0f
     private var spawnWallTimer  = 0f
     private var spawnWallInterval = 2.5f
@@ -259,7 +259,7 @@ class GameViewModel : ViewModel() {
         }
         val prio = (1..5).random()
         // High-priority processes (P1) expire faster from the ready queue
-        val maxWait = burst * 1.5f + prio * 3.5f + 6f
+        val maxWait = burst * 5f + prio * 5f + 25f
 
         val p = Process(
             pid         = pidCounter,
