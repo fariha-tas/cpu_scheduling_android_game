@@ -32,15 +32,16 @@ fun GameScreen(
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     LaunchedEffect(viewModel.isGameOver) {
         if (viewModel.isGameOver) {
             delay(600)
+            viewModel.playSound(context, R.raw.gameover)
             onGameOver()
         }
     }
 
     val level = viewModel.selectedLevel
-    val context = LocalContext.current
     val optimalPid by remember { derivedStateOf { viewModel.getOptimalPid() } }
 
     Box(
@@ -97,7 +98,10 @@ fun GameScreen(
             AlgoIntroOverlay(
                 algorithm = viewModel.assignedAlgorithm,
                 currLevelNo = viewModel.currLevelNo,
-                onDismiss = viewModel::dismissAlgoIntro
+                onStartClick = {
+                    viewModel.playSound(context, R.raw.gamestart)
+                    viewModel.dismissAlgoIntro()
+                }
             )
         }
 
@@ -144,7 +148,7 @@ fun GameScreen(
 private fun AlgoIntroOverlay(
     algorithm: SchedulingAlgorithm,
     currLevelNo: Int,
-    onDismiss: () -> Unit
+    onStartClick: () -> Unit
 ) {
     val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
         initialValue = 1f, targetValue = 1.04f,
@@ -285,7 +289,7 @@ private fun AlgoIntroOverlay(
             }
 
             Button(
-                onClick = onDismiss,
+                onClick = {onStartClick()},
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = GoldenBright, contentColor = DarkBg)
