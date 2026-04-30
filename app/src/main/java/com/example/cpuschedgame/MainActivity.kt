@@ -92,6 +92,7 @@ fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
                 },
                 onBackClick = {
                     vm.stopGame()
+                    vm.resetLevel()
                     navController.navigate("home") {
                         popUpTo("home") { inclusive = true }
                     }
@@ -108,12 +109,20 @@ fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
                 wrongPicks     = vm.wrongPicks,
                 timeElapsed    = vm.wallTime,
                 algorithm = vm.assignedAlgorithm ?: SchedulingAlgorithm.FCFS,
-                onPlayAgain = {
+                onPlayNextLevel = {
+                    vm.incrementLevel()
+                    navController.navigate("game/${vm.selectedLevel.name}") {
+                        popUpTo("result") { inclusive = true }
+                    }
+                },
+                onRetry = {
+                    vm.replayLevel()   // startGame with same algo
                     navController.navigate("game/${vm.selectedLevel.name}") {
                         popUpTo("result") { inclusive = true }
                     }
                 },
                 onHome = {
+                    vm.resetLevel()
                     navController.navigate("home") {
                         popUpTo("home") { inclusive = true }
                     }

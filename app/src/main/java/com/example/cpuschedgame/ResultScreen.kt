@@ -1,6 +1,7 @@
 package com.example.cpuschedgame
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -28,8 +29,9 @@ fun ResultScreen(
     wrongPicks: Int,
     timeElapsed: Float,
     algorithm: SchedulingAlgorithm,
-    onPlayAgain: () -> Unit,
+    onPlayNextLevel: () -> Unit,
     onHome: () -> Unit,
+    onRetry: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val totalPicks = correctPicks + wrongPicks
@@ -180,25 +182,51 @@ fun ResultScreen(
                 )
             }
 
+            val canProgress = accuracy >= 80
+
             Spacer(Modifier.height(4.dp))
 
+// Next Level button — greyed out if accuracy < 80
             Button(
-                onClick = onPlayAgain,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                onClick = { if (canProgress) onPlayNextLevel() },
+                enabled = canProgress,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = GreenAccent, contentColor = TextPrimary)
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = GreenAccent,
+                    contentColor = TextPrimary,
+                    disabledContainerColor = DarkCard,
+                    disabledContentColor = TextSecondary
+                )
             ) {
-                Text("▶  PLAY AGAIN", fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Text(
+                    if (canProgress) "▶  Next Level" else "▶  Next Level (need 80% accuracy)",
+                    fontSize = 13.sp, fontWeight = FontWeight.Bold
+                )
             }
-
-            OutlinedButton(
-                onClick = onHome,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(8.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("⌂  HOME", fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                OutlinedButton(
+                    onClick = onRetry,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, WarningOrange.copy(alpha = 0.6f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = WarningOrange)
+                ) {
+                    Text("↺  Retry", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = onHome,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, DarkBorder),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                ) {
+                    Text("⌂  Home", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -221,7 +249,7 @@ fun ResultPreview() {
             correctPicks = 7, wrongPicks = 2,
             timeElapsed = 65f,
             algorithm = SchedulingAlgorithm.SJF_NP,
-            onPlayAgain = {}, onHome = {}
+            onPlayNextLevel = {}, onRetry = {}, onHome = {}
         )
     }
 }

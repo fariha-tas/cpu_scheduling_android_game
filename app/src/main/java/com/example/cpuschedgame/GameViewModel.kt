@@ -33,6 +33,8 @@ class GameViewModel : ViewModel() {
     var ganttChart         = mutableStateListOf<GanttEntry>(); private set
 
     // ── Game state ────────────────────────────────────────────────
+    var currLevelNo by mutableStateOf(1)
+        private set
     var score            by mutableIntStateOf(0);   private set
     var lives            by mutableIntStateOf(3);   private set
     var hasGameStarted   by mutableStateOf(false);  private set
@@ -70,7 +72,8 @@ class GameViewModel : ViewModel() {
 
     // ── Public API ────────────────────────────────────────────────
 
-    fun startGame(level: Level) {
+    fun startGame(level: Level, forcedAlgorithm: SchedulingAlgorithm? = null) {
+
         selectedLevel = level
         resetState()
         hasGameStarted = true
@@ -80,14 +83,21 @@ class GameViewModel : ViewModel() {
             SchedulingAlgorithm.SJF_NP,
             SchedulingAlgorithm.PRIORITY_NP
         )
-        val hardAlgorithms = listOf(
+        val mediumAlgorithms = listOf(
             SchedulingAlgorithm.ROUND_ROBIN,
             SchedulingAlgorithm.SJF_P,
             SchedulingAlgorithm.PRIORITY_P
         )
+        val hardAlgorithms = listOf(
+            SchedulingAlgorithm.FCFS_Priority,
+            SchedulingAlgorithm.FCFS_SJF,
+            SchedulingAlgorithm.Priority_SJF,
+            SchedulingAlgorithm.SJF_Priority
+        )
 
-        assignedAlgorithm = when (level) {
+        assignedAlgorithm = forcedAlgorithm ?: when (level) {
             Level.Easy -> easyAlgorithms.random()
+            Level.Medium -> mediumAlgorithms.random()
             Level.Hard -> hardAlgorithms.random()
         }
 
@@ -184,6 +194,18 @@ class GameViewModel : ViewModel() {
                     .minWithOrNull(compareBy<Process> { it.priority }.thenBy { it.arrivalTime }.thenBy { it.pid })?.pid
             SchedulingAlgorithm.ROUND_ROBIN ->
                 waitingProcesses.firstOrNull()?.pid
+            SchedulingAlgorithm.FCFS_SJF ->
+                waitingProcesses
+                    .minWithOrNull(compareBy<Process> { it.arrivalTime }.thenBy { it.burstTime }.thenBy { it.pid })?.pid
+            SchedulingAlgorithm.FCFS_Priority ->
+                waitingProcesses
+                    .minWithOrNull(compareBy<Process> { it.arrivalTime }.thenBy { it.priority }.thenBy { it.pid })?.pid
+            SchedulingAlgorithm.SJF_Priority ->
+                waitingProcesses
+                    .minWithOrNull(compareBy<Process> { it.burstTime }.thenBy { it.priority }.thenBy { it.arrivalTime }.thenBy { it.pid })?.pid
+            SchedulingAlgorithm.Priority_SJF ->
+                waitingProcesses
+                    .minWithOrNull(compareBy<Process> { it.priority }.thenBy { it.burstTime }.thenBy { it.arrivalTime }.thenBy { it.pid })?.pid
             null -> null
         }
     }
@@ -193,8 +215,22 @@ class GameViewModel : ViewModel() {
     /** Scale factor: 1.0 = real-time, 0.4 = 2.5× slower. */
     private val GAME_SPEED = 0.4f
 
-    private fun isHardLevel() = selectedLevel == Level.Hard
+    private fun isHardLevel(): Boolean{
+        return (selectedLevel == Level.Hard || selectedLevel == Level.Medium)
+    }
 
+    fun incrementLevel() {
+        currLevelNo++
+    }
+
+    fun resetLevel() {
+        currLevelNo = 1
+    }
+
+    fun replayLevel() {
+        val algo = assignedAlgorithm  // keep the same one
+        startGame(selectedLevel, forcedAlgorithm = algo)
+    }
     private fun tick(rawDelta: Float) {
         val delta = rawDelta * GAME_SPEED
         wallTime       += delta
@@ -395,7 +431,9 @@ class GameViewModel : ViewModel() {
                 waitingProcesses.isEmpty() &&
                 pendingProcesses.isEmpty()
         if (allSpawned && allClear) {
-            isGameWon  = true
+            val totalPicks = correctPicks + wrongPicks
+            val accuracy   = if (totalPicks > 0) (correctPicks * 100 / totalPicks) else 0
+            isGameWon  = accuracy >= 80   // ← win only if accuracy meets threshold
             isGameOver = true
             gameJob?.cancel()
         }

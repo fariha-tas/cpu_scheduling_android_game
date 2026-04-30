@@ -25,7 +25,6 @@ import com.example.cpuschedgame.ui.theme.*
 import kotlinx.coroutines.delay
 
 
-
 @Composable
 fun GameScreen(
     viewModel: GameViewModel,
@@ -97,6 +96,7 @@ fun GameScreen(
         ) {
             AlgoIntroOverlay(
                 algorithm = viewModel.assignedAlgorithm,
+                currLevelNo = viewModel.currLevelNo,
                 onDismiss = viewModel::dismissAlgoIntro
             )
         }
@@ -143,6 +143,7 @@ fun GameScreen(
 @Composable
 private fun AlgoIntroOverlay(
     algorithm: SchedulingAlgorithm,
+    currLevelNo: Int,
     onDismiss: () -> Unit
 ) {
     val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
@@ -170,9 +171,18 @@ private fun AlgoIntroOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("YOUR ALGORITHM", color = TextSecondary, fontSize = 10.sp, letterSpacing = 3.sp)
 
-            // Big algorithm badge
+            Box(
+                modifier = Modifier
+                    .size(200.dp, 55.dp)
+                    .background(DangerRed.copy(alpha = 0.14f), RoundedCornerShape(14.dp))
+                    .border(2.dp, DangerRed, RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Level - $currLevelNo", color = DangerRed, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(2.dp))
+            Text("YOUR ALGORITHM", color = TextSecondary, fontSize = 10.sp, letterSpacing = 3.sp)
             Box(
                 modifier = Modifier
                     .scale(pulse)
