@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -19,7 +21,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             CPUSchedGameTheme {
                 val navController = rememberNavController()
-                val gameViewModel: GameViewModel = viewModel()
+                val gameViewModel: GameViewModel = viewModel(
+                    factory = ViewModelProvider.AndroidViewModelFactory
+                        .getInstance(application)
+                )
                 AppNavHost(navController, gameViewModel)
             }
         }
@@ -28,14 +33,63 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
-    NavHost(navController = navController, startDestination = "home") {
+    NavHost(
+        navController    = navController,
+        startDestination = "splash"
+    ) {
+
+        // ── Splash screen ─────────────────────────────────────────
+
+        composable("splash") {
+            CpuAnimation(
+                onSplashComplete = {
+                    navController.navigate("login") {
+                        popUpTo("splash") { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        // ── Auth screens ──────────────────────────────────────────
+
+        composable("login") {
+            LoginScreen(
+                authError   = vm.authError,
+                onLogin     = { username, password ->
+                    vm.login(username, password) {
+                        navController.navigate("home") {
+                            popUpTo("login") { inclusive = true }
+                        }
+                    }
+                },
+                onGoToSignup = {
+                    navController.navigate("signup")
+                }
+            )
+        }
+
+        composable("signup") {
+            SignupScreen(
+                authError = vm.authError,
+                onSignup  = { username, password ->
+                    vm.signup(username, password) {
+                        navController.navigate("login") {
+                            popUpTo("signup") { inclusive = true }
+                        }
+                    }
+                },
+                onGoToLogin = {
+                    vm.clearAuthError()
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        // ── Main screens ──────────────────────────────────────────
 
         composable("home") {
             HomeScreen(
-                onStartGameClick = {
-                    vm.startGame()
-                    navController.navigate("game") { popUpTo("home") }
-                },
+                onStartGameClick = { navController.navigate("game_start") },
                 onHowToPlayClick = { navController.navigate("howtoplay") }
             )
         }
@@ -44,12 +98,15 @@ fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
             HowToPlayScreen(onBackClick = { navController.popBackStack() })
         }
 
-        composable("game") {
+        composable("game_start") {
+            LaunchedEffect(Unit) {       // ← fixed: runs only once
+                vm.startGame()
+            }
             GameScreen(
-                viewModel = vm,
+                viewModel  = vm,
                 onGameOver = {
                     navController.navigate("result") {
-                        popUpTo("game") { inclusive = true }
+                        popUpTo("game_start") { inclusive = true }
                     }
                 },
                 onBackClick = {
@@ -64,15 +121,16 @@ fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
         composable("result") {
             ResultScreen(
                 score          = vm.score,
-                isGameWon      = vm.isGameWon,
                 completedCount = vm.completedProcesses.size,
-                correctPicks   = vm.correctPicks,
-                wrongPicks     = vm.wrongPicks,
                 timeElapsed    = vm.wallTime,
                 algorithm      = vm.assignedAlgorithm,
+                isWon          = vm.isGameWon,
+                correctPicks   = vm.correctPicks,
+                wrongPicks     = vm.wrongPicks,
                 onPlayAgain = {
-                    vm.startGame()
-                    navController.navigate("game") { popUpTo("home") }
+                    navController.navigate("game_start") {
+                        popUpTo("home")
+                    }
                 },
                 onHome = {
                     navController.navigate("home") {
