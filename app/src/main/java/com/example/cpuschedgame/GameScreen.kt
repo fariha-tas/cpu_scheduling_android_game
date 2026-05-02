@@ -66,7 +66,14 @@ fun GameScreen(
                 running = viewModel.runningProcess,
                 progress = viewModel.cpuBurstProgress,
                 remainingBurst = viewModel.cpuRemainingBurst,
-                isPreemptive = isPreemptive
+                isPreemptive = isPreemptive,
+                awaitingDecision = viewModel.awaitingPreemptDecision,
+                isRRBased = viewModel.isRRBased(),
+                onContinue = {
+                    viewModel.runningProcess?.let { proc ->
+                        viewModel.scheduleProcess(proc, context)
+                    }
+                }
             )
 
             ReadyQueuePanel(
@@ -74,6 +81,7 @@ fun GameScreen(
                 wrongPid = viewModel.lastWrongPid,
                 cpuBusy = viewModel.runningProcess != null,
                 isPreemptive = isPreemptive,
+                awaitingDecision = viewModel.awaitingPreemptDecision,
                 onSchedule = { process -> viewModel.scheduleProcess(process, context) },
                 modifier = Modifier.weight(1f)
             )
@@ -389,98 +397,154 @@ private fun CPUPanel(
     running: Process?,
     progress: Float,
     remainingBurst: Int,
-    isPreemptive: Boolean
+    isPreemptive: Boolean,
+    awaitingDecision: Boolean,
+    isRRBased: Boolean,
+    onContinue: () -> Unit
 ) {
     val animProgress by animateFloatAsState(progress, tween(200), label = "cpu")
 
-    Row(
+    // Pulse border when player must make a decision
+    val decisionPulse by rememberInfiniteTransition(label = "decPulse").animateFloat(
+        initialValue = 0.4f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(500, easing = EaseInOutSine), RepeatMode.Reverse),
+        label = "decAlpha"
+    )
+    val borderColor = when {
+        awaitingDecision && running != null -> WarningOrange.copy(alpha = decisionPulse)
+        running != null                     -> GreenBright.copy(alpha = 0.4f)
+        else                               -> DarkBorder
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(DarkSurface)
             .padding(horizontal = 10.dp, vertical = 8.dp)
-            .background(DarkCard, RoundedCornerShape(8.dp))
-            .border(
-                1.dp,
-                if (running != null) GreenBright.copy(alpha = 0.4f) else DarkBorder,
-                RoundedCornerShape(8.dp)
-            )
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .background(
-                    if (running != null) GreenAccent.copy(alpha = 0.2f)
-                    else DarkBorder.copy(alpha = 0.15f),
-                    RoundedCornerShape(6.dp)
+        // Decision banner
+        if (awaitingDecision && isPreemptive) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(WarningOrange.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                    .border(1.dp, WarningOrange.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("⏱", color = WarningOrange, fontSize = 14.sp)
+                Text(
+                    if (isRRBased) "TIME UNIT DONE — Pick next process from queue!"
+                    else "TIME UNIT DONE — Continue this process or switch to another?",
+                    color = WarningOrange, fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp,
+                    modifier = Modifier.weight(1f)
                 )
-                .border(1.dp, if (running != null) GreenBright else DarkBorder,
-                    RoundedCornerShape(6.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                "CPU",
-                color = if (running != null) GreenBright else TextSecondary,
-                fontSize = 9.sp, fontWeight = FontWeight.Bold
-            )
+            }
+            Spacer(Modifier.height(5.dp))
         }
 
-        Column(Modifier.weight(1f)) {
-            if (running != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    TypeBadge(running.type)
-                    Text(
-                        running.name, color = TextPrimary, fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(DarkCard, RoundedCornerShape(8.dp))
+                .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+                .then(
+                    // Allow tapping CPU panel to "continue" when awaiting decision and not RR
+                    if (awaitingDecision && running != null && !isRRBased)
+                        Modifier.clickable(onClick = onContinue)
+                    else Modifier
+                )
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(
+                        if (running != null) GreenAccent.copy(alpha = 0.2f)
+                        else DarkBorder.copy(alpha = 0.15f),
+                        RoundedCornerShape(6.dp)
                     )
-                    Text("P${running.priority}", color = TextSecondary, fontSize = 10.sp)
-                    Text("AT:${running.arrivalTime}", color = InfoBlue.copy(alpha = 0.7f),
-                        fontSize = 10.sp)
-                }
-                Spacer(Modifier.height(5.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    // Show correct label based on level type
-                    Text(
-                        if (isPreemptive) "EXECUTING (preemptive — tap to preempt)"
-                        else "EXECUTING (non-preemptive)",
-                        color = TextSecondary, fontSize = 9.sp
-                    )
-                    Text("$remainingBurst / ${running.burstTime} units left",
-                        color = TextSecondary, fontSize = 9.sp)
-                }
-                Spacer(Modifier.height(3.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth().height(7.dp)
-                        .background(DarkBg, RoundedCornerShape(4.dp))
-                ) {
+                    .border(1.dp, if (running != null) GreenBright else DarkBorder,
+                        RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "CPU",
+                    color = if (running != null) GreenBright else TextSecondary,
+                    fontSize = 9.sp, fontWeight = FontWeight.Bold
+                )
+            }
+
+            Column(Modifier.weight(1f)) {
+                if (running != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        TypeBadge(running.type)
+                        Text(
+                            running.name, color = TextPrimary, fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+                        )
+                        Text("P${running.priority}", color = TextSecondary, fontSize = 10.sp)
+                        Text("AT:${running.arrivalTime}", color = InfoBlue.copy(alpha = 0.7f),
+                            fontSize = 10.sp)
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(
+                            when {
+                                awaitingDecision && !isRRBased -> "TAP HERE to continue ▶"
+                                isPreemptive -> "EXECUTING (preemptive)"
+                                else -> "EXECUTING (non-preemptive)"
+                            },
+                            color = if (awaitingDecision && !isRRBased) WarningOrange
+                            else TextSecondary,
+                            fontSize = 9.sp,
+                            fontWeight = if (awaitingDecision && !isRRBased)
+                                FontWeight.Bold else FontWeight.Normal
+                        )
+                        Text("$remainingBurst / ${running.burstTime} units left",
+                            color = TextSecondary, fontSize = 9.sp)
+                    }
+                    Spacer(Modifier.height(3.dp))
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(animProgress).fillMaxHeight()
-                            .background(
-                                if (isPreemptive) InfoBlue else GreenBright,
-                                RoundedCornerShape(4.dp)
-                            )
+                            .fillMaxWidth().height(7.dp)
+                            .background(DarkBg, RoundedCornerShape(4.dp))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(animProgress).fillMaxHeight()
+                                .background(
+                                    if (awaitingDecision) WarningOrange
+                                    else if (isPreemptive) InfoBlue
+                                    else GreenBright,
+                                    RoundedCornerShape(4.dp)
+                                )
+                        )
+                    }
+                } else {
+                    Text("IDLE", color = TextSecondary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (awaitingDecision) "Select a process from the queue →"
+                        else "Tap a process below to schedule it →",
+                        color = TextSecondary.copy(alpha = 0.45f), fontSize = 11.sp
                     )
                 }
-            } else {
-                Text("IDLE", color = TextSecondary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Text("Tap a process below to schedule it →",
-                    color = TextSecondary.copy(alpha = 0.45f), fontSize = 11.sp)
             }
-        }
 
-        if (running != null) {
-            Column(horizontalAlignment = Alignment.End) {
-                Text("PID", color = TextSecondary, fontSize = 9.sp)
-                Text("#${running.pid}", color = GoldenLight, fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold)
+            if (running != null) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("PID", color = TextSecondary, fontSize = 9.sp)
+                    Text("#${running.pid}", color = GoldenLight, fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -493,6 +557,7 @@ private fun ReadyQueuePanel(
     wrongPid: Int?,
     cpuBusy: Boolean,
     isPreemptive: Boolean,
+    awaitingDecision: Boolean,
     onSchedule: (Process) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -512,9 +577,15 @@ private fun ReadyQueuePanel(
                 letterSpacing = 1.sp, fontWeight = FontWeight.Bold
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (isPreemptive && cpuBusy) {
+                if (isPreemptive && awaitingDecision) {
                     Text(
-                        "tap to preempt",
+                        "tap to switch",
+                        color = WarningOrange.copy(alpha = 0.8f), fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                } else if (isPreemptive && cpuBusy) {
+                    Text(
+                        "waiting for next unit…",
                         color = InfoBlue.copy(alpha = 0.7f), fontSize = 9.sp
                     )
                 }
@@ -570,6 +641,7 @@ private fun ReadyQueuePanel(
                             isWrong = proc.pid == wrongPid,
                             cpuBusy = cpuBusy,
                             isPreemptive = isPreemptive,
+                            awaitingDecision = awaitingDecision,
                             onSchedule = { onSchedule(proc) }
                         )
                     }
@@ -585,6 +657,7 @@ private fun ProcessCard(
     isWrong: Boolean,
     cpuBusy: Boolean,
     isPreemptive: Boolean,
+    awaitingDecision: Boolean,
     onSchedule: () -> Unit
 ) {
     val urgency = (process.waitTimer / process.maxWaitTime).coerceIn(0f, 1f)
@@ -606,8 +679,8 @@ private fun ProcessCard(
     val borderWidth = if (isWrong) 3.dp else 1.dp
     val bgColor     = if (isWrong) DangerRed.copy(alpha = 0.22f) else DarkCard
 
-    // Cards are always tappable on preemptive levels; only blocked when CPU busy on non-preemptive
-    val isClickable = isPreemptive || !cpuBusy
+    // Cards clickable: non-preemptive when CPU free; preemptive only when awaiting decision
+    val isClickable = if (isPreemptive) (awaitingDecision || !cpuBusy) else !cpuBusy
 
     Row(
         modifier = Modifier

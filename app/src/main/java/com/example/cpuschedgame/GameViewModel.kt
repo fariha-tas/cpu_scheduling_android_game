@@ -58,6 +58,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var correctPicks by mutableIntStateOf(0); private set
     var wrongPicks by mutableIntStateOf(0); private set
     var lastWrongPid by mutableStateOf<Int?>(null); private set
+    /** True when a preemptive time-unit has just completed and we're waiting for user to decide */
+    var awaitingPreemptDecision by mutableStateOf(false); private set
+    /** How many time units the current running process has executed so far */
+    var unitsExecutedThisBurst by mutableIntStateOf(0); private set
 
     // ── Private fields ────────────────────────────────────────────
     private val MAX_PROCESSES = 10
@@ -69,6 +73,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private var gameJob: Job? = null
     private var wrongFlashJob: Job? = null
     private var schedulingCpuStart = 0
+    /** Round Robin queue — tracks order processes should be served */
+    private val rrQueue = mutableListOf<Int>()   // holds PIDs in RR order
 
     private val nameParts = listOf(
         "calc", "browser", "mail", "media", "net",
@@ -82,20 +88,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         SchedulingAlgorithm.PRIORITY_NP
     )
 
-    // Medium = preemptive single-algorithm variants (includes preemptive FCFS)
+    // Medium = preemptive (per time-unit decision): SJF-P, PRIORITY-P, RR
     private val mediumAlgorithms = listOf(
-        SchedulingAlgorithm.FCFS_P,
         SchedulingAlgorithm.SJF_P,
         SchedulingAlgorithm.PRIORITY_P,
         SchedulingAlgorithm.ROUND_ROBIN
     )
 
-    // Hard = hybrid preemptive (primary + tie-break key)
+    // Hard = hybrid preemptive (primary + tie-break key), per-time-unit decision
     private val hardAlgorithms = listOf(
-        SchedulingAlgorithm.FCFS_SJF,
-        SchedulingAlgorithm.FCFS_Priority,
         SchedulingAlgorithm.SJF_Priority,
-        SchedulingAlgorithm.Priority_SJF
+        SchedulingAlgorithm.Priority_SJF,
+        SchedulingAlgorithm.RR_SJF,
+        SchedulingAlgorithm.RR_Priority
     )
 
     // ─────────────────────────────────────────────────────────────
@@ -193,20 +198,66 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Player taps a process card.
-     * Non-preemptive: tap ignored while CPU is busy.
-     * Preemptive (Medium/Hard): running process is preempted if the pick is correct.
+     * Player taps a process card (from waiting queue) OR taps the currently running process
+     * (to continue it for another time unit on preemptive levels).
+     *
+     * Non-preemptive (Easy): tap ignored while CPU is busy.
+     * Preemptive (Medium/Hard): after each time unit the game pauses for a user decision.
+     *   - Tap a WAITING card  → preempt/switch to that process (correct if it's the optimal pick)
+     *   - Tap the RUNNING card (pid == runningProcess.pid) → continue it (correct if it IS optimal)
      */
     fun scheduleProcess(process: Process, context: Context) {
         if (isGameOver || isPaused || showAlgoIntro || !hasGameStarted) return
-        if (waitingProcesses.none { it.pid == process.pid }) return
-
         val isPreemptive = isPreemptiveLevel()
 
-        // Block new scheduling while CPU is busy for non-preemptive
+        // Non-preemptive: ignore taps while CPU busy
         if (!isPreemptive && runningProcess != null) return
 
-        val optimalPid = getOptimalPid()
+        val currentRunning = runningProcess
+
+        // On preemptive levels determine if the user tapped the currently running process
+        // (meaning "keep it going for another unit")
+        val tappedRunning = isPreemptive
+                && currentRunning != null
+                && process.pid == currentRunning.pid
+
+        if (tappedRunning) {
+            // "Continue" tap — valid only when we are awaiting a decision
+            if (!awaitingPreemptDecision) return
+            val optimalPid = getOptimalPid(includingRunning = true)
+            val isCorrect = optimalPid == null || currentRunning!!.pid == optimalPid
+            if (isCorrect) {
+                playSound(context, R.raw.correct)
+                correctPicks++
+                score += 10   // small bonus for a correct "continue" decision
+            } else {
+                playSound(context, R.raw.wrong)
+                wrongPicks++
+                lives = maxOf(0, lives - 1)
+                score = maxOf(0, score - 50)
+                lastWrongPid = currentRunning!!.pid
+                wrongFlashJob?.cancel()
+                wrongFlashJob = viewModelScope.launch {
+                    delay(500L)
+                    lastWrongPid = null
+                }
+                if (lives == 0) {
+                    isGameOver = true; saveScore(); gameJob?.cancel(); return
+                }
+            }
+            // Resume executing the same process
+            awaitingPreemptDecision = false
+            return
+        }
+
+        // Tapped a waiting process card
+        if (waitingProcesses.none { it.pid == process.pid }) return
+
+        // On preemptive levels we only accept a switch tap while awaiting decision
+        // (or when CPU is idle — always allowed)
+        if (isPreemptive && currentRunning != null && !awaitingPreemptDecision) return
+
+        val optimalPid = getOptimalPid(includingRunning = true)
         val isCorrect = optimalPid == null || process.pid == optimalPid
 
         if (isCorrect) {
@@ -214,16 +265,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             correctPicks++
             score += computeScore(process)
 
-            if (isPreemptive && runningProcess != null) {
+            if (isPreemptive && currentRunning != null) {
                 preemptRunningProcess()
             }
 
             waitingProcesses.removeAll { it.pid == process.pid }
             runningProcess = process.copy(state = ProcessState.RUNNING)
             cpuTimer = 0f
+            unitsExecutedThisBurst = 0
             cpuRemainingBurst = process.burstTime
             cpuBurstProgress = 0f
             schedulingCpuStart = schedulingTime
+            awaitingPreemptDecision = false
+
+            // RR: move this pid to the back of the RR queue
+            if (isRRBased()) {
+                rrQueue.remove(process.pid)
+                rrQueue.add(process.pid)
+            }
         } else {
             playSound(context, R.raw.wrong)
             wrongPicks++
@@ -236,9 +295,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 lastWrongPid = null
             }
             if (lives == 0) {
-                isGameOver = true
-                saveScore()
-                gameJob?.cancel()
+                isGameOver = true; saveScore(); gameJob?.cancel()
             }
         }
     }
@@ -249,52 +306,98 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         mp.start()
     }
 
-    fun getOptimalPid(): Int? {
-        if (waitingProcesses.isEmpty()) return null
+    /**
+     * Returns the PID of the process that the current algorithm says should run next.
+     * [includingRunning] — if true, the currently running process is included in the
+     * candidate pool (used for preemptive per-unit decisions so the player can be told
+     * whether "continue" or "switch" is optimal).
+     */
+    fun getOptimalPid(includingRunning: Boolean = false): Int? {
+        // Build the candidate pool
+        val candidates: List<Process> = if (includingRunning && runningProcess != null) {
+            waitingProcesses + runningProcess!!
+        } else {
+            waitingProcesses.toList()
+        }
+        if (candidates.isEmpty()) return null
+
         return when (assignedAlgorithm) {
-            SchedulingAlgorithm.FCFS,
-            SchedulingAlgorithm.FCFS_P ->
-                waitingProcesses
-                    .minWithOrNull(compareBy<Process> { it.arrivalTime }.thenBy { it.pid })?.pid
+            SchedulingAlgorithm.FCFS ->
+                candidates.minWithOrNull(compareBy<Process> { it.arrivalTime }.thenBy { it.pid })?.pid
 
             SchedulingAlgorithm.SJF_NP,
             SchedulingAlgorithm.SJF_P ->
-                waitingProcesses
-                    .minWithOrNull(compareBy<Process> { it.burstTime }
-                        .thenBy { it.arrivalTime }.thenBy { it.pid })?.pid
+                candidates.minWithOrNull(
+                    compareBy<Process> { it.burstTime }.thenBy { it.arrivalTime }.thenBy { it.pid }
+                )?.pid
 
             SchedulingAlgorithm.PRIORITY_NP,
             SchedulingAlgorithm.PRIORITY_P ->
-                waitingProcesses
-                    .minWithOrNull(compareBy<Process> { it.priority }
-                        .thenBy { it.arrivalTime }.thenBy { it.pid })?.pid
+                candidates.minWithOrNull(
+                    compareBy<Process> { it.priority }.thenBy { it.arrivalTime }.thenBy { it.pid }
+                )?.pid
 
-            SchedulingAlgorithm.ROUND_ROBIN ->
-                waitingProcesses.firstOrNull()?.pid
-
-            SchedulingAlgorithm.FCFS_SJF ->
-                waitingProcesses
-                    .minWithOrNull(compareBy<Process> { it.arrivalTime }
-                        .thenBy { it.burstTime }.thenBy { it.pid })?.pid
-
-            SchedulingAlgorithm.FCFS_Priority ->
-                waitingProcesses
-                    .minWithOrNull(compareBy<Process> { it.arrivalTime }
-                        .thenBy { it.priority }.thenBy { it.pid })?.pid
+            SchedulingAlgorithm.ROUND_ROBIN -> {
+                // For RR the optimal pick is the FIRST pid in rrQueue that exists in candidates
+                val candidatePids = candidates.map { it.pid }.toSet()
+                val nextRR = rrQueue.firstOrNull { it in candidatePids }
+                // If nothing in rrQueue matches, take earliest arrival
+                nextRR ?: candidates.minByOrNull { it.arrivalTime }?.pid
+            }
 
             SchedulingAlgorithm.SJF_Priority ->
-                waitingProcesses
-                    .minWithOrNull(compareBy<Process> { it.burstTime }
-                        .thenBy { it.priority }.thenBy { it.arrivalTime }.thenBy { it.pid })?.pid
+                candidates.minWithOrNull(
+                    compareBy<Process> { it.burstTime }.thenBy { it.priority }
+                        .thenBy { it.arrivalTime }.thenBy { it.pid }
+                )?.pid
 
             SchedulingAlgorithm.Priority_SJF ->
-                waitingProcesses
-                    .minWithOrNull(compareBy<Process> { it.priority }
-                        .thenBy { it.burstTime }.thenBy { it.arrivalTime }.thenBy { it.pid })?.pid
+                candidates.minWithOrNull(
+                    compareBy<Process> { it.priority }.thenBy { it.burstTime }
+                        .thenBy { it.arrivalTime }.thenBy { it.pid }
+                )?.pid
+
+            SchedulingAlgorithm.RR_SJF -> {
+                // RR order first; among tied-next candidates pick smallest BT
+                val candidatePids = candidates.map { it.pid }.toSet()
+                val nextRRIdx = rrQueue.indexOfFirst { it in candidatePids }
+                if (nextRRIdx < 0) {
+                    candidates.minWithOrNull(compareBy { it.burstTime })?.pid
+                } else {
+                    // Collect all that would be "next" in RR (same queue position ties)
+                    val nextPid = rrQueue[nextRRIdx]
+                    // In practice RR has a single next; use BT as direct tie-break on the pool
+                    candidates.filter { it.pid == nextPid }
+                        .minWithOrNull(compareBy { it.burstTime })?.pid
+                        ?: candidates.minWithOrNull(
+                            compareBy<Process> { it.burstTime }.thenBy { it.arrivalTime }
+                        )?.pid
+                }
+            }
+
+            SchedulingAlgorithm.RR_Priority -> {
+                val candidatePids = candidates.map { it.pid }.toSet()
+                val nextRRIdx = rrQueue.indexOfFirst { it in candidatePids }
+                if (nextRRIdx < 0) {
+                    candidates.minWithOrNull(compareBy { it.priority })?.pid
+                } else {
+                    val nextPid = rrQueue[nextRRIdx]
+                    candidates.filter { it.pid == nextPid }
+                        .minWithOrNull(compareBy { it.priority })?.pid
+                        ?: candidates.minWithOrNull(
+                            compareBy<Process> { it.priority }.thenBy { it.arrivalTime }
+                        )?.pid
+                }
+            }
 
             null -> null
         }
     }
+
+    /** True if the assigned algorithm uses Round Robin as primary key */
+    fun isRRBased(): Boolean = assignedAlgorithm == SchedulingAlgorithm.ROUND_ROBIN
+            || assignedAlgorithm == SchedulingAlgorithm.RR_SJF
+            || assignedAlgorithm == SchedulingAlgorithm.RR_Priority
 
     fun dismissAlgoIntro() { showAlgoIntro = false }
     fun togglePause() { isPaused = !isPaused }
@@ -317,8 +420,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private fun tick(rawDelta: Float) {
         val delta = rawDelta * GAME_SPEED
         wallTime += delta
-        spawnWallTimer += delta
 
+        // While awaiting preemptive decision only expiry timers tick
+        if (awaitingPreemptDecision) {
+            tickExpiryOnly(delta)
+            return
+        }
+
+        spawnWallTimer += delta
         if (spawnWallTimer >= spawnWallInterval && pidCounter <= MAX_PROCESSES) {
             spawnWallTimer = 0f
             spawnWallInterval = (20..55).random() / 10f
@@ -327,7 +436,94 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             updateAvailability()
         }
 
-        // Expire overdue waiting processes
+        tickExpiryOnly(delta)
+        if (isGameOver) return
+
+        runningProcess?.let { proc ->
+            cpuTimer += delta
+
+            if (isPreemptiveLevel()) {
+                val unitsDone = cpuTimer.toInt()
+                if (unitsDone > unitsExecutedThisBurst) {
+                    unitsExecutedThisBurst = unitsDone
+                    schedulingTime = schedulingCpuStart + unitsDone
+                    updateAvailability()
+
+                    cpuRemainingBurst = (proc.burstTime - unitsDone).coerceAtLeast(0)
+                    cpuBurstProgress = (unitsDone.toFloat() / proc.burstTime).coerceIn(0f, 1f)
+
+                    if (unitsDone >= proc.burstTime) {
+                        finishRunningProcess(proc, unitsDone)
+                        autoAdvanceIfIdle()
+                        checkWinCondition()
+                    } else {
+                        // For RR-based: mandatory rotation after 1 unit
+                        if (isRRBased()) {
+                            val endTime = schedulingCpuStart + unitsDone
+                            ganttChart.add(
+                                GanttEntry(
+                                    pid = proc.pid, name = proc.name,
+                                    duration = 1, type = proc.type,
+                                    startTime = endTime - 1, endTime = endTime
+                                )
+                            )
+                            schedulingTime = endTime
+                            val remainingBurst = (proc.burstTime - unitsDone).coerceAtLeast(0)
+                            rrQueue.remove(proc.pid)
+                            if (remainingBurst > 0) {
+                                rrQueue.add(proc.pid)
+                                waitingProcesses.add(
+                                    proc.copy(
+                                        burstTime = remainingBurst,
+                                        state = ProcessState.WAITING,
+                                        waitTimer = 0f
+                                    )
+                                )
+                            } else {
+                                completedProcesses.add(proc.copy(state = ProcessState.COMPLETED))
+                            }
+                            runningProcess = null
+                            cpuTimer = 0f; cpuRemainingBurst = 0; cpuBurstProgress = 0f
+                            unitsExecutedThisBurst = 0
+                            updateAvailability()
+                        }
+                        // Pause for user decision (continue or switch)
+                        awaitingPreemptDecision = true
+                    }
+                } else {
+                    val fracInUnit = cpuTimer - unitsDone.toFloat()
+                    cpuBurstProgress = ((unitsDone + fracInUnit) / proc.burstTime).coerceIn(0f, 1f)
+                    cpuRemainingBurst = (proc.burstTime - cpuTimer).toInt().coerceAtLeast(0)
+                }
+            } else {
+                // Non-preemptive: run to completion
+                cpuRemainingBurst = (proc.burstTime - cpuTimer).toInt().coerceAtLeast(0)
+                cpuBurstProgress = (cpuTimer / proc.burstTime).coerceIn(0f, 1f)
+                if (cpuTimer >= proc.burstTime.toFloat()) {
+                    schedulingTime += proc.burstTime
+                    ganttChart.add(
+                        GanttEntry(
+                            pid = proc.pid, name = proc.name,
+                            duration = proc.burstTime, type = proc.type,
+                            startTime = schedulingCpuStart,
+                            endTime = schedulingCpuStart + proc.burstTime
+                        )
+                    )
+                    completedProcesses.add(proc.copy(state = ProcessState.COMPLETED))
+                    runningProcess = null
+                    cpuTimer = 0f; cpuRemainingBurst = 0; cpuBurstProgress = 0f
+                    updateAvailability()
+                    autoAdvanceIfIdle()
+                    checkWinCondition()
+                }
+            }
+        } ?: run {
+            autoAdvanceIfIdle()
+            checkWinCondition()
+        }
+    }
+
+    private fun tickExpiryOnly(delta: Float) {
         val expired = mutableListOf<Int>()
         val updated = waitingProcesses.map { p ->
             val newTimer = p.waitTimer + delta
@@ -336,70 +532,32 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
         waitingProcesses.clear()
         waitingProcesses.addAll(updated.filter { it.pid !in expired })
-
         if (expired.isNotEmpty()) {
+            expired.forEach { rrQueue.remove(it) }
             lives = maxOf(0, lives - expired.size)
             score = maxOf(0, score - 50 * expired.size)
             if (lives <= 0) {
-                lives = 0; isGameOver = true; saveScore(); gameJob?.cancel(); return
+                lives = 0; isGameOver = true; saveScore(); gameJob?.cancel()
             }
         }
+    }
 
-        // CPU execution
-        runningProcess?.let { proc ->
-            cpuTimer += delta
-
-            if (isPreemptiveLevel()) {
-                val elapsed = cpuTimer.toInt()
-                val newSchedTime = schedulingCpuStart + elapsed
-                if (newSchedTime > schedulingTime) {
-                    val nextArrival = pendingProcesses.minOfOrNull { it.arrivalTime }
-                    schedulingTime = newSchedTime
-                    val shouldAutoPreempt = nextArrival != null
-                            && schedulingTime >= nextArrival
-                            && elapsed < proc.burstTime
-                    if (shouldAutoPreempt) {
-                        val executedUnits = (nextArrival!! - schedulingCpuStart)
-                            .coerceIn(0, proc.burstTime)
-                        schedulingTime = schedulingCpuStart + executedUnits
-                        preemptRunningProcessWithUnits(proc, executedUnits)
-                        updateAvailability()
-                        return
-                    }
-                    updateAvailability()
-                }
-            }
-
-            val remaining = proc.burstTime - cpuTimer
-            cpuRemainingBurst = remaining.toInt().coerceAtLeast(0)
-            cpuBurstProgress = (cpuTimer / proc.burstTime).coerceIn(0f, 1f)
-
-            if (cpuTimer >= proc.burstTime.toFloat()) {
-                val executedUnits = proc.burstTime
-                val endTime = schedulingCpuStart + executedUnits
-                if (!isPreemptiveLevel()) {
-                    schedulingTime += executedUnits
-                } else {
-                    schedulingTime = endTime
-                }
-                ganttChart.add(
-                    GanttEntry(
-                        pid = proc.pid, name = proc.name,
-                        duration = executedUnits, type = proc.type,
-                        startTime = schedulingCpuStart, endTime = endTime
-                    )
-                )
-                completedProcesses.add(proc.copy(state = ProcessState.COMPLETED))
-                runningProcess = null
-                cpuTimer = 0f; cpuRemainingBurst = 0; cpuBurstProgress = 0f
-                updateAvailability()
-                autoAdvanceIfIdle()
-                checkWinCondition()
-            }
-        } ?: run {
-            autoAdvanceIfIdle()
-            checkWinCondition()
-        }
+    private fun finishRunningProcess(proc: Process, executedUnits: Int) {
+        val endTime = schedulingCpuStart + executedUnits
+        schedulingTime = endTime
+        ganttChart.add(
+            GanttEntry(
+                pid = proc.pid, name = proc.name,
+                duration = executedUnits, type = proc.type,
+                startTime = schedulingCpuStart, endTime = endTime
+            )
+        )
+        completedProcesses.add(proc.copy(state = ProcessState.COMPLETED))
+        rrQueue.remove(proc.pid)
+        runningProcess = null
+        cpuTimer = 0f; cpuRemainingBurst = 0; cpuBurstProgress = 0f
+        unitsExecutedThisBurst = 0
+        awaitingPreemptDecision = false
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -408,11 +566,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun preemptRunningProcess() {
         val proc = runningProcess ?: return
-        val executedUnits = cpuTimer.toInt().coerceAtMost(proc.burstTime)
-        preemptRunningProcessWithUnits(proc, executedUnits)
-    }
-
-    private fun preemptRunningProcessWithUnits(proc: Process, executedUnits: Int) {
+        val executedUnits = unitsExecutedThisBurst.coerceAtMost(proc.burstTime)
         val remainingBurst = (proc.burstTime - executedUnits).coerceAtLeast(0)
         val endTime = schedulingCpuStart + executedUnits
         if (executedUnits > 0) {
@@ -431,9 +585,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             )
         } else {
             completedProcesses.add(proc.copy(state = ProcessState.COMPLETED))
+            rrQueue.remove(proc.pid)
         }
         runningProcess = null
         cpuTimer = 0f; cpuRemainingBurst = 0; cpuBurstProgress = 0f
+        unitsExecutedThisBurst = 0
+        awaitingPreemptDecision = false
     }
 
     private fun autoAdvanceIfIdle() {
@@ -468,6 +625,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val arrivedPids = nowArrived.map { it.pid }.toSet()
         pendingProcesses.removeAll { it.pid in arrivedPids }
         waitingProcesses.addAll(nowArrived)
+        // Register new arrivals at the back of the RR queue
+        nowArrived.forEach { p -> if (p.pid !in rrQueue) rrQueue.add(p.pid) }
     }
 
     private fun spawnProcess(arrivalTime: Int) {
@@ -489,8 +648,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             maxWaitTime = maxWait
         )
         pidCounter++
-        if (arrivalTime <= schedulingTime) waitingProcesses.add(p)
-        else pendingProcesses.add(p)
+        if (arrivalTime <= schedulingTime) {
+            waitingProcesses.add(p)
+            if (p.pid !in rrQueue) rrQueue.add(p.pid)
+        } else {
+            pendingProcesses.add(p)
+        }
     }
 
     private fun computeScore(proc: Process): Int {
@@ -537,6 +700,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         spawnWallTimer = 0f; spawnWallInterval = 2.5f
         pidCounter = 1; correctPicks = 0; wrongPicks = 0
         lastWrongPid = null; schedulingCpuStart = 0
+        awaitingPreemptDecision = false; unitsExecutedThisBurst = 0
+        rrQueue.clear()
     }
 
     override fun onCleared() { super.onCleared(); gameJob?.cancel() }

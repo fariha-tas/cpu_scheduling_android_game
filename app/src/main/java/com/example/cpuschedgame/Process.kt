@@ -79,83 +79,68 @@ enum class SchedulingAlgorithm(
     ),
 
     // ── Medium (preemptive single-algorithm) ─────────────────────
-    FCFS_P(
-        shortName = "FCFS-P",
-        displayName = "First Come First Served\n(Preemptive)",
-        description = "Earliest arrival gets CPU; new arrivals can preempt the running process.",
-        detail = "Like FCFS but preemptive. If a process with an earlier arrival time appears " +
-                "while another is running, it can take over the CPU immediately.",
-        hint = "Pick the process that ARRIVED EARLIEST (lowest AT). You can preempt the running process!",
-        hintShort = "Pick LOWEST Arrival Time (AT)\nYou can preempt mid-execution!"
-    ),
     SJF_P(
         shortName = "SJF-P",
         displayName = "Shortest Job\nFirst (Preemptive)",
-        description = "Pick the shortest burst time first — can preempt mid-execution!",
-        detail = "Gives optimal average waiting time. Schedule the process with the smallest " +
-                "burst time. Break ties with lowest AT. Long processes may starve.",
-        hint = "Pick the process with the SMALLEST burst time (BT). You can preempt the running process!",
-        hintShort = "Pick SMALLEST Burst Time (BT)\nYou can preempt mid-execution!"
+        description = "Pick the shortest remaining burst time first — preempt after every time unit!",
+        detail = "After every CPU time unit you decide: keep the running process OR switch to the " +
+                "one with the smallest remaining burst time. Ties broken by lowest arrival time.",
+        hint = "Each time unit: if a waiting process has SMALLER BT than the running one, tap it to preempt. Otherwise tap the running process to continue.",
+        hintShort = "Every unit: SMALLEST BT wins\nTap running card to continue or switch"
     ),
     PRIORITY_P(
         shortName = "PRI-P",
         displayName = "Priority\nScheduling (Preemptive)",
-        description = "Execute highest priority (P1) first — can preempt mid-execution!",
-        detail = "Each process has a priority 1–5 where 1 is highest. Break ties with lowest AT. " +
-                "Always run the most critical process first. Risk of starvation for P5 processes.",
-        hint = "Pick the process with the LOWEST priority number (P1 is most urgent). You can preempt!",
-        hintShort = "Pick LOWEST Priority number (P1 first)\nYou can preempt mid-execution!"
+        description = "Highest priority (P1) wins every time unit — you decide each tick!",
+        detail = "After every CPU time unit you decide: keep the running process OR switch to a " +
+                "higher-priority one. Lowest priority number = most urgent. Ties broken by lowest AT.",
+        hint = "Each time unit: if a waiting process has LOWER priority number than the running one, tap it to preempt. Otherwise tap the running process to continue.",
+        hintShort = "Every unit: LOWEST Priority number wins\nTap running card to continue or switch"
     ),
     ROUND_ROBIN(
         shortName = "RR",
         displayName = "Round\nRobin",
-        description = "Each process gets an equal time slice (preemptive)",
-        detail = "Fair CPU sharing via time quantum. No starvation. Best for interactive systems. " +
-                "Every process gets a turn in order.",
-        hint = "Pick any process in order — Round Robin is fair! Each gets equal CPU time.",
-        hintShort = "Pick in ARRIVAL ORDER\nEach process gets equal CPU time"
+        description = "Each process gets exactly 1 time unit then rotates — you control the queue!",
+        detail = "Fair CPU sharing. Each process runs for 1 time unit, then you must send the next " +
+                "process in arrival order. No starvation — every process gets a turn.",
+        hint = "Every time unit you MUST pick the NEXT process in arrival order (rotate the queue). Tap the first card in the ready queue each tick.",
+        hintShort = "Every unit: rotate to NEXT in arrival order\nNo process gets more than 1 unit in a row"
     ),
 
     // ── Hard (hybrid preemptive) ──────────────────────────────────
-    FCFS_SJF(
-        shortName = "FCFS+SJF",
-        displayName = "FCFS & Shortest Job First\nScheduling",
-        description = "Lowest AT first; tie-break with smallest BT. Preemptive.",
-        detail = "Primary key: earliest arrival time. If two processes arrive at the same time, " +
-                "prefer the shorter burst. Can remove the running process mid-execution.",
-        hint = "Pick LOWEST Arrival Time (AT). Same AT → pick SMALLEST Burst Time (BT). " +
-                "Processes can be removed mid-execution!",
-        hintShort = "LOWEST AT → tie: SMALLEST BT\nPreemptive!"
-    ),
-    FCFS_Priority(
-        shortName = "FCFS+PRI",
-        displayName = "FCFS & Priority\nScheduling",
-        description = "Lowest AT first; tie-break with highest priority. Preemptive.",
-        detail = "Primary key: earliest arrival time. If two processes arrive together, " +
-                "prefer the highest priority (lowest number). Can preempt mid-execution.",
-        hint = "Pick LOWEST Arrival Time (AT). Same AT → pick LOWEST Priority number. " +
-                "Processes can be removed mid-execution!",
-        hintShort = "LOWEST AT → tie: LOWEST Priority\nPreemptive!"
-    ),
     SJF_Priority(
         shortName = "SJF+PRI",
         displayName = "Shortest Job First & Priority\nScheduling",
-        description = "Smallest BT first; tie-break with highest priority. Preemptive.",
-        detail = "Primary key: shortest burst time. Ties broken first by priority, then arrival time. " +
-                "Can preempt the running process mid-execution.",
-        hint = "Pick SMALLEST Burst Time (BT). Same BT → pick LOWEST Priority number. " +
-                "Processes can be removed mid-execution!",
-        hintShort = "SMALLEST BT → tie: LOWEST Priority\nPreemptive!"
+        description = "Smallest BT first; tie-break with highest priority. Preemptive per time unit.",
+        detail = "Primary key: shortest remaining burst time. Ties broken by priority number (lowest = most urgent), then by arrival time. After every time unit you decide whether to switch.",
+        hint = "Each unit: pick SMALLEST BT. Same BT → pick LOWEST Priority number. Preempt the running process if a better one is waiting!",
+        hintShort = "Every unit: SMALLEST BT → tie: LOWEST Priority\nPreemptive!"
     ),
     Priority_SJF(
         shortName = "PRI+SJF",
         displayName = "Priority & Shortest Job First\nScheduling",
-        description = "Highest priority first; tie-break with lowest BT. Preemptive.",
-        detail = "Primary key: highest priority (lowest number). Ties broken by burst time. " +
-                "Can preempt the running process mid-execution.",
-        hint = "Pick LOWEST Priority number (P1 most urgent). Same priority → pick SMALLEST BT. " +
-                "Processes can be removed mid-execution!",
-        hintShort = "LOWEST Priority → tie: SMALLEST BT\nPreemptive!"
+        description = "Highest priority first; tie-break with lowest BT. Preemptive per time unit.",
+        detail = "Primary key: highest priority (lowest number). Ties broken by shortest burst time, then arrival time. After every time unit you decide whether to switch.",
+        hint = "Each unit: pick LOWEST Priority number. Same priority → pick SMALLEST BT. Preempt if a more urgent process arrives!",
+        hintShort = "Every unit: LOWEST Priority → tie: SMALLEST BT\nPreemptive!"
+    ),
+    RR_SJF(
+        shortName = "RR+SJF",
+        displayName = "Round Robin & Shortest Job First\nScheduling",
+        description = "Round Robin with SJF tie-breaking. Preemptive per time unit.",
+        detail = "Rotate through processes in Round Robin order, but when multiple processes are " +
+                "tied in queue position, prefer the one with the smallest burst time. One unit per turn.",
+        hint = "Each unit: rotate to the NEXT process in queue. If tied for 'next', pick SMALLEST BT. Every process gets exactly 1 unit before rotating.",
+        hintShort = "Every unit: RR rotation → tie: SMALLEST BT\nPreemptive!"
+    ),
+    RR_Priority(
+        shortName = "RR+PRI",
+        displayName = "Round Robin & Priority\nScheduling",
+        description = "Round Robin with Priority tie-breaking. Preemptive per time unit.",
+        detail = "Rotate through processes in Round Robin order, but when multiple processes are " +
+                "tied in queue position, prefer the highest priority (lowest number). One unit per turn.",
+        hint = "Each unit: rotate to the NEXT process in queue. If tied for 'next', pick LOWEST Priority number. Every process gets exactly 1 unit before rotating.",
+        hintShort = "Every unit: RR rotation → tie: LOWEST Priority\nPreemptive!"
     )
 }
 
