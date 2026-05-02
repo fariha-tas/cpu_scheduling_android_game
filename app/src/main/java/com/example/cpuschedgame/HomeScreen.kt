@@ -22,8 +22,10 @@ import com.example.cpuschedgame.ui.theme.*
 
 @Composable
 fun HomeScreen(
+    username: String = "",
     onStartGameClick: () -> Unit,
     onHowToPlayClick: () -> Unit,
+    onProfileClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
@@ -38,7 +40,6 @@ fun HomeScreen(
             .fillMaxSize()
             .background(DarkBg)
     ) {
-        // Subtle radial glow behind title
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -107,14 +108,15 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Box(
-                    Modifier
-                        .size(7.dp)
-                        .background(GreenBright, CircleShape)
-                )
+                Box(Modifier.size(7.dp).background(GreenBright, CircleShape))
                 Text("SYSTEM READY", color = GreenBright, fontSize = 11.sp)
                 Text("|", color = DarkBorder, fontSize = 11.sp)
-                Text("4 ALGORITHMS", color = TextSecondary, fontSize = 11.sp)
+                if (username.isNotBlank()) {
+                    Text(username.uppercase(), color = GoldenLight, fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold)
+                } else {
+                    Text("4 ALGORITHMS", color = TextSecondary, fontSize = 11.sp)
+                }
             }
 
             Spacer(Modifier.height(60.dp))
@@ -127,10 +129,11 @@ fun HomeScreen(
                     containerColor = GreenAccent, contentColor = TextPrimary
                 )
             ) {
-                Text("▶  START GAME", fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Text("▶  START GAME", fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp)
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
             OutlinedButton(
                 onClick = onHowToPlayClick,
@@ -139,7 +142,21 @@ fun HomeScreen(
                 border = androidx.compose.foundation.BorderStroke(1.dp, Golden),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldenLight)
             ) {
-                Text("?  HOW TO PLAY", fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Text("?  HOW TO PLAY", fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp)
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            OutlinedButton(
+                onClick = onProfileClick,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, GoldenBright.copy(alpha = 0.4f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+            ) {
+                Text("◉  PROFILE", fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp)
             }
 
             Spacer(Modifier.height(48.dp))
@@ -157,6 +174,11 @@ fun HomeScreen(
 @Composable
 fun HomeScreenPreview() {
     com.example.cpuschedgame.ui.theme.CPUSchedGameTheme {
-        HomeScreen(onStartGameClick = {}, onHowToPlayClick = {})
+        HomeScreen(
+            username = "player1",
+            onStartGameClick = {},
+            onHowToPlayClick = {},
+            onProfileClick = {}
+        )
     }
 }

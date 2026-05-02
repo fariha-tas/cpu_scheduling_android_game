@@ -40,9 +40,8 @@ fun GameScreen(
         }
     }
 
-    // Safe fallback — algorithm is always set before GameScreen is shown
     val algo = viewModel.assignedAlgorithm ?: SchedulingAlgorithm.FCFS
-    val optimalPid by remember { derivedStateOf { viewModel.getOptimalPid() } }
+    val isPreemptive = viewModel.isPreemptiveLevel()
 
     Box(
         modifier = modifier
@@ -61,26 +60,24 @@ fun GameScreen(
                 onBack = { viewModel.stopGame(); onBackClick() }
             )
 
-            // Persistent one-line hint bar (Branch 2)
             AlgoHintBar(algorithm = algo)
 
             CPUPanel(
                 running = viewModel.runningProcess,
                 progress = viewModel.cpuBurstProgress,
-                remainingBurst = viewModel.cpuRemainingBurst
+                remainingBurst = viewModel.cpuRemainingBurst,
+                isPreemptive = isPreemptive
             )
 
-            // Ready queue — tappable cards
             ReadyQueuePanel(
                 processes = viewModel.waitingProcesses,
-                optimalPid = optimalPid,
                 wrongPid = viewModel.lastWrongPid,
                 cpuBusy = viewModel.runningProcess != null,
+                isPreemptive = isPreemptive,
                 onSchedule = { process -> viewModel.scheduleProcess(process, context) },
                 modifier = Modifier.weight(1f)
             )
 
-            // Incoming / pending panel (Branch 2)
             if (viewModel.pendingProcesses.isNotEmpty()) {
                 IncomingPanel(
                     processes = viewModel.pendingProcesses,
@@ -180,7 +177,6 @@ private fun AlgoIntroOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Level badge
             Box(
                 modifier = Modifier
                     .size(200.dp, 55.dp)
@@ -195,7 +191,6 @@ private fun AlgoIntroOverlay(
             Spacer(Modifier.height(2.dp))
             Text("YOUR ALGORITHM", color = TextSecondary, fontSize = 10.sp, letterSpacing = 3.sp)
 
-            // Animated algorithm badge
             Box(
                 modifier = Modifier
                     .scale(pulse)
@@ -222,7 +217,6 @@ private fun AlgoIntroOverlay(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
             ) {
-                // What to do box
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -246,7 +240,6 @@ private fun AlgoIntroOverlay(
                 )
                 Spacer(Modifier.height(8.dp))
 
-                // Penalty reminder box
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -287,7 +280,6 @@ private fun GameHUD(
     algo: SchedulingAlgorithm, isPaused: Boolean,
     onPause: () -> Unit, onBack: () -> Unit
 ) {
-    // Branch 2: confirmation dialog instead of immediate exit
     var showExitDialog by remember { mutableStateOf(false) }
 
     Row(
@@ -325,7 +317,6 @@ private fun GameHUD(
 
         Spacer(Modifier.width(8.dp))
 
-        // Scheduling clock (Branch 2 improvement over Branch 1's wall-time)
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("CPU CLK", color = TextSecondary, fontSize = 9.sp, letterSpacing = 1.sp)
             Text("T=$schedulingTime", color = InfoBlue, fontSize = 13.sp,
@@ -348,27 +339,22 @@ private fun GameHUD(
         }
     }
 
-    // Exit confirmation dialog (Branch 2)
     if (showExitDialog) {
         AlertDialog(
             onDismissRequest = { showExitDialog = false },
             title = { Text("Exit Game?") },
             text = { Text("Do you want to go back? Game progress will be lost.") },
             confirmButton = {
-                TextButton(onClick = { showExitDialog = false; onBack() }) {
-                    Text("Yes")
-                }
+                TextButton(onClick = { showExitDialog = false; onBack() }) { Text("Yes") }
             },
             dismissButton = {
-                TextButton(onClick = { showExitDialog = false }) {
-                    Text("No")
-                }
+                TextButton(onClick = { showExitDialog = false }) { Text("No") }
             }
         )
     }
 }
 
-// ── Algorithm Hint Bar (Branch 2) ─────────────────────────────────
+// ── Algorithm Hint Bar ────────────────────────────────────────────
 @Composable
 private fun AlgoHintBar(algorithm: SchedulingAlgorithm) {
     Column(
@@ -381,7 +367,7 @@ private fun AlgoHintBar(algorithm: SchedulingAlgorithm) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("★", color = GoldenBright, fontSize = 12.sp)
+            Text("▶", color = GoldenBright, fontSize = 10.sp)
             Text(
                 algorithm.hintShort,
                 color = GoldenLight, fontSize = 11.sp,
@@ -392,14 +378,19 @@ private fun AlgoHintBar(algorithm: SchedulingAlgorithm) {
             "Wrong Pick = −♥ and -50 Score",
             color = DangerRed.copy(alpha = 0.8f),
             fontSize = 10.sp,
-            modifier = Modifier.padding(start = 20.dp)
+            modifier = Modifier.padding(start = 18.dp)
         )
     }
 }
 
 // ── CPU Panel ────────────────────────────────────────────────────
 @Composable
-private fun CPUPanel(running: Process?, progress: Float, remainingBurst: Int) {
+private fun CPUPanel(
+    running: Process?,
+    progress: Float,
+    remainingBurst: Int,
+    isPreemptive: Boolean
+) {
     val animProgress by animateFloatAsState(progress, tween(200), label = "cpu")
 
     Row(
@@ -454,7 +445,12 @@ private fun CPUPanel(running: Process?, progress: Float, remainingBurst: Int) {
                 }
                 Spacer(Modifier.height(5.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("EXECUTING (non-preemptive)", color = TextSecondary, fontSize = 9.sp)
+                    // Show correct label based on level type
+                    Text(
+                        if (isPreemptive) "EXECUTING (preemptive — tap to preempt)"
+                        else "EXECUTING (non-preemptive)",
+                        color = TextSecondary, fontSize = 9.sp
+                    )
                     Text("$remainingBurst / ${running.burstTime} units left",
                         color = TextSecondary, fontSize = 9.sp)
                 }
@@ -467,7 +463,10 @@ private fun CPUPanel(running: Process?, progress: Float, remainingBurst: Int) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(animProgress).fillMaxHeight()
-                            .background(GreenBright, RoundedCornerShape(4.dp))
+                            .background(
+                                if (isPreemptive) InfoBlue else GreenBright,
+                                RoundedCornerShape(4.dp)
+                            )
                     )
                 }
             } else {
@@ -491,9 +490,9 @@ private fun CPUPanel(running: Process?, progress: Float, remainingBurst: Int) {
 @Composable
 private fun ReadyQueuePanel(
     processes: List<Process>,
-    optimalPid: Int?,
     wrongPid: Int?,
     cpuBusy: Boolean,
+    isPreemptive: Boolean,
     onSchedule: (Process) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -512,16 +511,24 @@ private fun ReadyQueuePanel(
                 color = GreenBright, fontSize = 10.sp,
                 letterSpacing = 1.sp, fontWeight = FontWeight.Bold
             )
-            Text(
-                "${processes.size} waiting",
-                color = if (processes.size >= 5) WarningOrange else TextSecondary,
-                fontSize = 10.sp
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (isPreemptive && cpuBusy) {
+                    Text(
+                        "tap to preempt",
+                        color = InfoBlue.copy(alpha = 0.7f), fontSize = 9.sp
+                    )
+                }
+                Text(
+                    "${processes.size} waiting",
+                    color = if (processes.size >= 5) WarningOrange else TextSecondary,
+                    fontSize = 10.sp
+                )
+            }
         }
         Spacer(Modifier.height(6.dp))
 
         when {
-            processes.isEmpty() && cpuBusy -> {
+            processes.isEmpty() && cpuBusy && !isPreemptive -> {
                 Box(
                     Modifier
                         .fillMaxWidth().weight(1f)
@@ -560,9 +567,9 @@ private fun ReadyQueuePanel(
                     processes.forEach { proc ->
                         ProcessCard(
                             process = proc,
-                            isOptimal = proc.pid == optimalPid,
                             isWrong = proc.pid == wrongPid,
                             cpuBusy = cpuBusy,
+                            isPreemptive = isPreemptive,
                             onSchedule = { onSchedule(proc) }
                         )
                     }
@@ -575,9 +582,9 @@ private fun ReadyQueuePanel(
 @Composable
 private fun ProcessCard(
     process: Process,
-    isOptimal: Boolean,
     isWrong: Boolean,
     cpuBusy: Boolean,
+    isPreemptive: Boolean,
     onSchedule: () -> Unit
 ) {
     val urgency = (process.waitTimer / process.maxWaitTime).coerceIn(0f, 1f)
@@ -597,7 +604,10 @@ private fun ProcessCard(
 
     val borderColor = if (isWrong) DangerRed else DarkBorder
     val borderWidth = if (isWrong) 3.dp else 1.dp
-    val bgColor = if (isWrong) DangerRed.copy(alpha = 0.22f) else DarkCard
+    val bgColor     = if (isWrong) DangerRed.copy(alpha = 0.22f) else DarkCard
+
+    // Cards are always tappable on preemptive levels; only blocked when CPU busy on non-preemptive
+    val isClickable = isPreemptive || !cpuBusy
 
     Row(
         modifier = Modifier
@@ -606,7 +616,7 @@ private fun ProcessCard(
             .clip(RoundedCornerShape(8.dp))
             .background(bgColor)
             .border(borderWidth, borderColor, RoundedCornerShape(8.dp))
-            .then(if (!cpuBusy) Modifier.clickable(onClick = onSchedule) else Modifier)
+            .then(if (isClickable) Modifier.clickable(onClick = onSchedule) else Modifier)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -620,20 +630,18 @@ private fun ProcessCard(
             ) {
                 Text(
                     process.name,
-                    color = if (cpuBusy) TextSecondary else TextPrimary,
+                    // Dim text only if non-preemptive AND cpu busy
+                    color = if (!isClickable) TextSecondary else TextPrimary,
                     fontSize = 12.sp, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                when {
-                    isWrong   -> Text("✗", color = DangerRed, fontSize = 18.sp)
-                    isOptimal -> Text("★", color = GoldenBright, fontSize = 13.sp)
-                }
+                // Show ✗ on wrong pick — star hint deliberately removed (unfair to player)
+                if (isWrong) Text("✗", color = DangerRed, fontSize = 18.sp)
             }
 
             Spacer(Modifier.height(4.dp))
 
-            // Info chips: AT | BT | Priority | PID
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 InfoChip("AT:${process.arrivalTime}", InfoBlue)
                 InfoChip("BT:${process.burstTime}", GreenBright)
@@ -643,7 +651,6 @@ private fun ProcessCard(
 
             Spacer(Modifier.height(5.dp))
 
-            // Wait-expiry bar (counts down)
             Box(
                 Modifier
                     .fillMaxWidth().height(4.dp)
@@ -657,7 +664,6 @@ private fun ProcessCard(
             }
         }
 
-        // Time-to-expire counter
         val remaining = (process.maxWaitTime - process.waitTimer).coerceAtLeast(0f)
         Column(horizontalAlignment = Alignment.End) {
             Text("EXP", color = TextSecondary, fontSize = 8.sp)
@@ -670,7 +676,7 @@ private fun ProcessCard(
     }
 }
 
-// ── Incoming (Pending) Panel (Branch 2) ──────────────────────────
+// ── Incoming (Pending) Panel ──────────────────────────────────────
 @Composable
 private fun IncomingPanel(processes: List<Process>, schedulingTime: Int) {
     Column(
@@ -797,7 +803,6 @@ fun InfoChip(text: String, color: Color = TextSecondary) {
     )
 }
 
-/** Backward-compat alias used in some older composables. */
 @Composable
 fun Chip(text: String) = InfoChip(text)
 
