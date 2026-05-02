@@ -7,8 +7,9 @@ import androidx.room.PrimaryKey
 data class PlayerScore(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
-    val username: String,           // which player this score belongs to
+    val username: String,
     val score: Int,
+    val level: String,          // "Easy", "Medium", or "Hard"
     val algorithm: String,
     val completedProcesses: Int,
     val timeElapsed: Float,

@@ -88,11 +88,20 @@ fun AppNavHost(navController: NavHostController, vm: GameViewModel) {
         // ── Main screens ───────────────────────────────────────────
         composable("home") {
             HomeScreen(
+                username = vm.currentUsername,
                 onStartGameClick = {
                     // Branch 2: go to level select first
                     navController.navigate("levelselect") { popUpTo("home") }
                 },
-                onHowToPlayClick = { navController.navigate("howtoplay") }
+                onHowToPlayClick = { navController.navigate("howtoplay") },
+                onProfileClick = { navController.navigate("profile") }
+            )
+        }
+
+        composable("profile") {
+            ProfileScreen(
+                viewModel = vm,
+                onBackClick = { navController.popBackStack() }
             )
         }
 

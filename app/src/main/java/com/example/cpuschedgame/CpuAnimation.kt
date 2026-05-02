@@ -56,7 +56,7 @@ fun CpuAnimation(
 
             AsyncImage(
                 model = ImageRequest.Builder(context)
-                    .data(R.drawable.cpuloading_animation)
+                    .data(R.raw.cpuloading_animation)
                     .build(),
                 imageLoader        = imageLoader,
                 contentDescription = "CPU loading animation",

@@ -40,9 +40,8 @@ fun GameScreen(
         }
     }
 
-    // Safe fallback — algorithm is always set before GameScreen is shown
     val algo = viewModel.assignedAlgorithm ?: SchedulingAlgorithm.FCFS
-    val optimalPid by remember { derivedStateOf { viewModel.getOptimalPid() } }
+    val isPreemptive = viewModel.isPreemptiveLevel()
 
     Box(
         modifier = modifier
@@ -61,26 +60,45 @@ fun GameScreen(
                 onBack = { viewModel.stopGame(); onBackClick() }
             )
 
-            // Persistent one-line hint bar (Branch 2)
             AlgoHintBar(algorithm = algo)
 
             CPUPanel(
                 running = viewModel.runningProcess,
                 progress = viewModel.cpuBurstProgress,
-                remainingBurst = viewModel.cpuRemainingBurst
+                remainingBurst = viewModel.cpuRemainingBurst,
+                isPreemptive = isPreemptive,
+                awaitingDecision = viewModel.awaitingPreemptDecision,
+                isRRBased = viewModel.isRRBased(),
+                rrUnitsThisQuantum = viewModel.unitsExecutedThisBurst,
+                rrQuantum = viewModel.rrQuantum,
+                onContinue = {
+                    viewModel.runningProcess?.let { proc ->
+                        viewModel.scheduleProcess(proc, context)
+                    }
+                }
             )
 
-            // Ready queue — tappable cards
+            // RR queue order strip — only shown for RR-based algorithms
+            if (viewModel.isRRBased() && viewModel.rrQueuePids.isNotEmpty()) {
+                RRQueuePanel(
+                    rrQueuePids = viewModel.rrQueuePids,
+                    waitingProcesses = viewModel.waitingProcesses,
+                    runningProcess = viewModel.runningProcess,
+                    rrQuantum = viewModel.rrQuantum,
+                    unitsThisQuantum = viewModel.unitsExecutedThisBurst
+                )
+            }
+
             ReadyQueuePanel(
                 processes = viewModel.waitingProcesses,
-                optimalPid = optimalPid,
                 wrongPid = viewModel.lastWrongPid,
                 cpuBusy = viewModel.runningProcess != null,
+                isPreemptive = isPreemptive,
+                awaitingDecision = viewModel.awaitingPreemptDecision,
                 onSchedule = { process -> viewModel.scheduleProcess(process, context) },
                 modifier = Modifier.weight(1f)
             )
 
-            // Incoming / pending panel (Branch 2)
             if (viewModel.pendingProcesses.isNotEmpty()) {
                 IncomingPanel(
                     processes = viewModel.pendingProcesses,
@@ -180,7 +198,6 @@ private fun AlgoIntroOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Level badge
             Box(
                 modifier = Modifier
                     .size(200.dp, 55.dp)
@@ -195,7 +212,6 @@ private fun AlgoIntroOverlay(
             Spacer(Modifier.height(2.dp))
             Text("YOUR ALGORITHM", color = TextSecondary, fontSize = 10.sp, letterSpacing = 3.sp)
 
-            // Animated algorithm badge
             Box(
                 modifier = Modifier
                     .scale(pulse)
@@ -222,7 +238,6 @@ private fun AlgoIntroOverlay(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
             ) {
-                // What to do box
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -246,7 +261,6 @@ private fun AlgoIntroOverlay(
                 )
                 Spacer(Modifier.height(8.dp))
 
-                // Penalty reminder box
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -287,7 +301,6 @@ private fun GameHUD(
     algo: SchedulingAlgorithm, isPaused: Boolean,
     onPause: () -> Unit, onBack: () -> Unit
 ) {
-    // Branch 2: confirmation dialog instead of immediate exit
     var showExitDialog by remember { mutableStateOf(false) }
 
     Row(
@@ -325,7 +338,6 @@ private fun GameHUD(
 
         Spacer(Modifier.width(8.dp))
 
-        // Scheduling clock (Branch 2 improvement over Branch 1's wall-time)
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("CPU CLK", color = TextSecondary, fontSize = 9.sp, letterSpacing = 1.sp)
             Text("T=$schedulingTime", color = InfoBlue, fontSize = 13.sp,
@@ -348,27 +360,22 @@ private fun GameHUD(
         }
     }
 
-    // Exit confirmation dialog (Branch 2)
     if (showExitDialog) {
         AlertDialog(
             onDismissRequest = { showExitDialog = false },
             title = { Text("Exit Game?") },
             text = { Text("Do you want to go back? Game progress will be lost.") },
             confirmButton = {
-                TextButton(onClick = { showExitDialog = false; onBack() }) {
-                    Text("Yes")
-                }
+                TextButton(onClick = { showExitDialog = false; onBack() }) { Text("Yes") }
             },
             dismissButton = {
-                TextButton(onClick = { showExitDialog = false }) {
-                    Text("No")
-                }
+                TextButton(onClick = { showExitDialog = false }) { Text("No") }
             }
         )
     }
 }
 
-// ── Algorithm Hint Bar (Branch 2) ─────────────────────────────────
+// ── Algorithm Hint Bar ────────────────────────────────────────────
 @Composable
 private fun AlgoHintBar(algorithm: SchedulingAlgorithm) {
     Column(
@@ -381,7 +388,7 @@ private fun AlgoHintBar(algorithm: SchedulingAlgorithm) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("★", color = GoldenBright, fontSize = 12.sp)
+            Text("▶", color = GoldenBright, fontSize = 10.sp)
             Text(
                 algorithm.hintShort,
                 color = GoldenLight, fontSize = 11.sp,
@@ -392,96 +399,203 @@ private fun AlgoHintBar(algorithm: SchedulingAlgorithm) {
             "Wrong Pick = −♥ and -50 Score",
             color = DangerRed.copy(alpha = 0.8f),
             fontSize = 10.sp,
-            modifier = Modifier.padding(start = 20.dp)
+            modifier = Modifier.padding(start = 18.dp)
         )
     }
 }
 
 // ── CPU Panel ────────────────────────────────────────────────────
 @Composable
-private fun CPUPanel(running: Process?, progress: Float, remainingBurst: Int) {
+private fun CPUPanel(
+    running: Process?,
+    progress: Float,
+    remainingBurst: Int,
+    isPreemptive: Boolean,
+    awaitingDecision: Boolean,
+    isRRBased: Boolean,
+    rrUnitsThisQuantum: Int,
+    rrQuantum: Int,
+    onContinue: () -> Unit
+) {
     val animProgress by animateFloatAsState(progress, tween(200), label = "cpu")
 
-    Row(
+    // Pulse border when player must make a decision
+    val decisionPulse by rememberInfiniteTransition(label = "decPulse").animateFloat(
+        initialValue = 0.4f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(500, easing = EaseInOutSine), RepeatMode.Reverse),
+        label = "decAlpha"
+    )
+    val borderColor = when {
+        awaitingDecision && running != null -> WarningOrange.copy(alpha = decisionPulse)
+        running != null                     -> GreenBright.copy(alpha = 0.4f)
+        else                               -> DarkBorder
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(DarkSurface)
             .padding(horizontal = 10.dp, vertical = 8.dp)
-            .background(DarkCard, RoundedCornerShape(8.dp))
-            .border(
-                1.dp,
-                if (running != null) GreenBright.copy(alpha = 0.4f) else DarkBorder,
-                RoundedCornerShape(8.dp)
-            )
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .background(
-                    if (running != null) GreenAccent.copy(alpha = 0.2f)
-                    else DarkBorder.copy(alpha = 0.15f),
-                    RoundedCornerShape(6.dp)
+        // Decision banner
+        if (awaitingDecision && isPreemptive) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(WarningOrange.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                    .border(1.dp, WarningOrange.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("⏱", color = WarningOrange, fontSize = 14.sp)
+                Text(
+                    if (isRRBased)
+                        "QUANTUM DONE — Tap the NEXT process in the RR queue below!"
+                    else
+                        "TIME UNIT DONE — Continue this process or switch to another?",
+                    color = WarningOrange, fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp,
+                    modifier = Modifier.weight(1f)
                 )
-                .border(1.dp, if (running != null) GreenBright else DarkBorder,
-                    RoundedCornerShape(6.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                "CPU",
-                color = if (running != null) GreenBright else TextSecondary,
-                fontSize = 9.sp, fontWeight = FontWeight.Bold
-            )
+            }
+            Spacer(Modifier.height(5.dp))
         }
 
-        Column(Modifier.weight(1f)) {
-            if (running != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    TypeBadge(running.type)
-                    Text(
-                        running.name, color = TextPrimary, fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+        // Quantum progress bar (RR only, while process is running)
+        if (isRRBased && running != null && !awaitingDecision && rrQuantum > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(InfoBlue.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
+                    .border(1.dp, InfoBlue.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("⌛", color = InfoBlue, fontSize = 11.sp)
+                Text(
+                    "QUANTUM: $rrUnitsThisQuantum / $rrQuantum  — rotating after $rrQuantum units",
+                    color = InfoBlue, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                // Quantum pip dots
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    repeat(rrQuantum) { i ->
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .background(
+                                    if (i < rrUnitsThisQuantum) InfoBlue else DarkBorder,
+                                    RoundedCornerShape(2.dp)
+                                )
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(5.dp))
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(DarkCard, RoundedCornerShape(8.dp))
+                .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+                .then(
+                    // Allow tapping CPU panel to "continue" when awaiting decision and not RR
+                    if (awaitingDecision && running != null && !isRRBased)
+                        Modifier.clickable(onClick = onContinue)
+                    else Modifier
+                )
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(
+                        if (running != null) GreenAccent.copy(alpha = 0.2f)
+                        else DarkBorder.copy(alpha = 0.15f),
+                        RoundedCornerShape(6.dp)
                     )
-                    Text("P${running.priority}", color = TextSecondary, fontSize = 10.sp)
-                    Text("AT:${running.arrivalTime}", color = InfoBlue.copy(alpha = 0.7f),
-                        fontSize = 10.sp)
-                }
-                Spacer(Modifier.height(5.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("EXECUTING (non-preemptive)", color = TextSecondary, fontSize = 9.sp)
-                    Text("$remainingBurst / ${running.burstTime} units left",
-                        color = TextSecondary, fontSize = 9.sp)
-                }
-                Spacer(Modifier.height(3.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth().height(7.dp)
-                        .background(DarkBg, RoundedCornerShape(4.dp))
-                ) {
+                    .border(1.dp, if (running != null) GreenBright else DarkBorder,
+                        RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "CPU",
+                    color = if (running != null) GreenBright else TextSecondary,
+                    fontSize = 9.sp, fontWeight = FontWeight.Bold
+                )
+            }
+
+            Column(Modifier.weight(1f)) {
+                if (running != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        TypeBadge(running.type)
+                        Text(
+                            running.name, color = TextPrimary, fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+                        )
+                        Text("P${running.priority}", color = TextSecondary, fontSize = 10.sp)
+                        Text("AT:${running.arrivalTime}", color = InfoBlue.copy(alpha = 0.7f),
+                            fontSize = 10.sp)
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(
+                            when {
+                                awaitingDecision && !isRRBased -> "TAP HERE to continue ▶"
+                                isPreemptive -> "EXECUTING (preemptive)"
+                                else -> "EXECUTING (non-preemptive)"
+                            },
+                            color = if (awaitingDecision && !isRRBased) WarningOrange
+                            else TextSecondary,
+                            fontSize = 9.sp,
+                            fontWeight = if (awaitingDecision && !isRRBased)
+                                FontWeight.Bold else FontWeight.Normal
+                        )
+                        Text("$remainingBurst / ${running.burstTime} units left",
+                            color = TextSecondary, fontSize = 9.sp)
+                    }
+                    Spacer(Modifier.height(3.dp))
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(animProgress).fillMaxHeight()
-                            .background(GreenBright, RoundedCornerShape(4.dp))
+                            .fillMaxWidth().height(7.dp)
+                            .background(DarkBg, RoundedCornerShape(4.dp))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(animProgress).fillMaxHeight()
+                                .background(
+                                    if (awaitingDecision) WarningOrange
+                                    else if (isPreemptive) InfoBlue
+                                    else GreenBright,
+                                    RoundedCornerShape(4.dp)
+                                )
+                        )
+                    }
+                } else {
+                    Text("IDLE", color = TextSecondary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (awaitingDecision) "Select a process from the queue →"
+                        else "Tap a process below to schedule it →",
+                        color = TextSecondary.copy(alpha = 0.45f), fontSize = 11.sp
                     )
                 }
-            } else {
-                Text("IDLE", color = TextSecondary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Text("Tap a process below to schedule it →",
-                    color = TextSecondary.copy(alpha = 0.45f), fontSize = 11.sp)
             }
-        }
 
-        if (running != null) {
-            Column(horizontalAlignment = Alignment.End) {
-                Text("PID", color = TextSecondary, fontSize = 9.sp)
-                Text("#${running.pid}", color = GoldenLight, fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold)
+            if (running != null) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("PID", color = TextSecondary, fontSize = 9.sp)
+                    Text("#${running.pid}", color = GoldenLight, fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -491,9 +605,10 @@ private fun CPUPanel(running: Process?, progress: Float, remainingBurst: Int) {
 @Composable
 private fun ReadyQueuePanel(
     processes: List<Process>,
-    optimalPid: Int?,
     wrongPid: Int?,
     cpuBusy: Boolean,
+    isPreemptive: Boolean,
+    awaitingDecision: Boolean,
     onSchedule: (Process) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -512,16 +627,30 @@ private fun ReadyQueuePanel(
                 color = GreenBright, fontSize = 10.sp,
                 letterSpacing = 1.sp, fontWeight = FontWeight.Bold
             )
-            Text(
-                "${processes.size} waiting",
-                color = if (processes.size >= 5) WarningOrange else TextSecondary,
-                fontSize = 10.sp
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (isPreemptive && awaitingDecision) {
+                    Text(
+                        "tap to switch",
+                        color = WarningOrange.copy(alpha = 0.8f), fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                } else if (isPreemptive && cpuBusy) {
+                    Text(
+                        "waiting for next unit…",
+                        color = InfoBlue.copy(alpha = 0.7f), fontSize = 9.sp
+                    )
+                }
+                Text(
+                    "${processes.size} waiting",
+                    color = if (processes.size >= 5) WarningOrange else TextSecondary,
+                    fontSize = 10.sp
+                )
+            }
         }
         Spacer(Modifier.height(6.dp))
 
         when {
-            processes.isEmpty() && cpuBusy -> {
+            processes.isEmpty() && cpuBusy && !isPreemptive -> {
                 Box(
                     Modifier
                         .fillMaxWidth().weight(1f)
@@ -560,9 +689,10 @@ private fun ReadyQueuePanel(
                     processes.forEach { proc ->
                         ProcessCard(
                             process = proc,
-                            isOptimal = proc.pid == optimalPid,
                             isWrong = proc.pid == wrongPid,
                             cpuBusy = cpuBusy,
+                            isPreemptive = isPreemptive,
+                            awaitingDecision = awaitingDecision,
                             onSchedule = { onSchedule(proc) }
                         )
                     }
@@ -575,9 +705,10 @@ private fun ReadyQueuePanel(
 @Composable
 private fun ProcessCard(
     process: Process,
-    isOptimal: Boolean,
     isWrong: Boolean,
     cpuBusy: Boolean,
+    isPreemptive: Boolean,
+    awaitingDecision: Boolean,
     onSchedule: () -> Unit
 ) {
     val urgency = (process.waitTimer / process.maxWaitTime).coerceIn(0f, 1f)
@@ -597,7 +728,10 @@ private fun ProcessCard(
 
     val borderColor = if (isWrong) DangerRed else DarkBorder
     val borderWidth = if (isWrong) 3.dp else 1.dp
-    val bgColor = if (isWrong) DangerRed.copy(alpha = 0.22f) else DarkCard
+    val bgColor     = if (isWrong) DangerRed.copy(alpha = 0.22f) else DarkCard
+
+    // Cards clickable: non-preemptive when CPU free; preemptive only when awaiting decision
+    val isClickable = if (isPreemptive) (awaitingDecision || !cpuBusy) else !cpuBusy
 
     Row(
         modifier = Modifier
@@ -606,7 +740,7 @@ private fun ProcessCard(
             .clip(RoundedCornerShape(8.dp))
             .background(bgColor)
             .border(borderWidth, borderColor, RoundedCornerShape(8.dp))
-            .then(if (!cpuBusy) Modifier.clickable(onClick = onSchedule) else Modifier)
+            .then(if (isClickable) Modifier.clickable(onClick = onSchedule) else Modifier)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -620,20 +754,18 @@ private fun ProcessCard(
             ) {
                 Text(
                     process.name,
-                    color = if (cpuBusy) TextSecondary else TextPrimary,
+                    // Dim text only if non-preemptive AND cpu busy
+                    color = if (!isClickable) TextSecondary else TextPrimary,
                     fontSize = 12.sp, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                when {
-                    isWrong   -> Text("✗", color = DangerRed, fontSize = 18.sp)
-                    isOptimal -> Text("★", color = GoldenBright, fontSize = 13.sp)
-                }
+                // Show ✗ on wrong pick — star hint deliberately removed (unfair to player)
+                if (isWrong) Text("✗", color = DangerRed, fontSize = 18.sp)
             }
 
             Spacer(Modifier.height(4.dp))
 
-            // Info chips: AT | BT | Priority | PID
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 InfoChip("AT:${process.arrivalTime}", InfoBlue)
                 InfoChip("BT:${process.burstTime}", GreenBright)
@@ -643,7 +775,6 @@ private fun ProcessCard(
 
             Spacer(Modifier.height(5.dp))
 
-            // Wait-expiry bar (counts down)
             Box(
                 Modifier
                     .fillMaxWidth().height(4.dp)
@@ -657,7 +788,6 @@ private fun ProcessCard(
             }
         }
 
-        // Time-to-expire counter
         val remaining = (process.maxWaitTime - process.waitTimer).coerceAtLeast(0f)
         Column(horizontalAlignment = Alignment.End) {
             Text("EXP", color = TextSecondary, fontSize = 8.sp)
@@ -670,7 +800,115 @@ private fun ProcessCard(
     }
 }
 
-// ── Incoming (Pending) Panel (Branch 2) ──────────────────────────
+// ── RR Queue Order Strip ──────────────────────────────────────────
+@Composable
+private fun RRQueuePanel(
+    rrQueuePids: List<Int>,
+    waitingProcesses: List<Process>,
+    runningProcess: Process?,
+    rrQuantum: Int,
+    unitsThisQuantum: Int
+) {
+    val allProcesses = waitingProcesses + listOfNotNull(runningProcess)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(InfoBlue.copy(alpha = 0.06f))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "RR QUEUE ORDER",
+                color = InfoBlue, fontSize = 9.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp
+            )
+            Text("Q=$rrQuantum units/turn", color = InfoBlue.copy(alpha = 0.6f), fontSize = 9.sp)
+            Spacer(Modifier.weight(1f))
+            Text("← picks in this order", color = TextSecondary.copy(alpha = 0.5f), fontSize = 8.sp)
+        }
+        Spacer(Modifier.height(5.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            items(rrQueuePids.size) { idx ->
+                val pid = rrQueuePids[idx]
+                val proc = allProcesses.firstOrNull { it.pid == pid }
+                val isNext = idx == 0
+                val isRunning = proc?.pid == runningProcess?.pid
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // Position label
+                    Text(
+                        if (isNext) "NEXT" else "${idx + 1}",
+                        color = if (isNext) WarningOrange else TextSecondary.copy(alpha = 0.5f),
+                        fontSize = 7.sp, fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(54.dp)
+                            .background(
+                                when {
+                                    isRunning -> GreenAccent.copy(alpha = 0.15f)
+                                    isNext    -> WarningOrange.copy(alpha = 0.12f)
+                                    else      -> DarkCard
+                                },
+                                RoundedCornerShape(6.dp)
+                            )
+                            .border(
+                                width = if (isNext || isRunning) 1.5.dp else 1.dp,
+                                color = when {
+                                    isRunning -> GreenBright.copy(alpha = 0.6f)
+                                    isNext    -> WarningOrange
+                                    else      -> DarkBorder
+                                },
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                            .padding(horizontal = 5.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "P#$pid",
+                                color = if (isNext) WarningOrange
+                                else if (isRunning) GreenBright
+                                else TextSecondary,
+                                fontSize = 9.sp, fontWeight = FontWeight.Bold
+                            )
+                            if (proc != null) {
+                                Text(
+                                    "BT:${proc.burstTime}",
+                                    color = GreenBright.copy(alpha = 0.7f),
+                                    fontSize = 8.sp
+                                )
+                            }
+                            if (isRunning && rrQuantum > 1) {
+                                // Tiny quantum pip row for the running process
+                                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    repeat(rrQuantum) { i ->
+                                        Box(
+                                            Modifier
+                                                .size(4.dp)
+                                                .background(
+                                                    if (i < unitsThisQuantum) GreenBright
+                                                    else DarkBorder,
+                                                    RoundedCornerShape(1.dp)
+                                                )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Incoming (Pending) Panel ──────────────────────────────────────
 @Composable
 private fun IncomingPanel(processes: List<Process>, schedulingTime: Int) {
     Column(
@@ -797,7 +1035,6 @@ fun InfoChip(text: String, color: Color = TextSecondary) {
     )
 }
 
-/** Backward-compat alias used in some older composables. */
 @Composable
 fun Chip(text: String) = InfoChip(text)
 
