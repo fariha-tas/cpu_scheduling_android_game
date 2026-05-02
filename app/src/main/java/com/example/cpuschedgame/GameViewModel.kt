@@ -73,8 +73,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private var gameJob: Job? = null
     private var wrongFlashJob: Job? = null
     private var schedulingCpuStart = 0
-    /** Round Robin queue — tracks order processes should be served */
-    private val rrQueue = mutableListOf<Int>()   // holds PIDs in RR order
+    /** Round Robin queue — tracks order processes should be served (observable for UI) */
+    val rrQueuePids = mutableStateListOf<Int>()   // holds PIDs in RR order
+
+    /** Time-slice quantum for RR: 2 units on Medium, 3 on Hard */
+    val rrQuantum: Int get() = if (selectedLevel == Level.Hard) 3 else 2
 
     private val nameParts = listOf(
         "calc", "browser", "mail", "media", "net",
@@ -99,8 +102,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val hardAlgorithms = listOf(
         SchedulingAlgorithm.SJF_Priority,
         SchedulingAlgorithm.Priority_SJF,
-        SchedulingAlgorithm.RR_SJF,
-        SchedulingAlgorithm.RR_Priority
+        SchedulingAlgorithm.SJF_RR,
+        SchedulingAlgorithm.Priority_RR
     )
 
     // ─────────────────────────────────────────────────────────────
@@ -278,10 +281,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             schedulingCpuStart = schedulingTime
             awaitingPreemptDecision = false
 
-            // RR: move this pid to the back of the RR queue
-            if (isRRBased()) {
-                rrQueue.remove(process.pid)
-                rrQueue.add(process.pid)
+            // RR / RR-tie-break: move this pid to the back of the RR queue so the next
+            // tie among equal-BT or equal-priority processes resolves to a different process.
+            if (isRRBased()
+                || assignedAlgorithm == SchedulingAlgorithm.SJF_RR
+                || assignedAlgorithm == SchedulingAlgorithm.Priority_RR
+            ) {
+                rrQueuePids.remove(process.pid)
+                rrQueuePids.add(process.pid)
             }
         } else {
             playSound(context, R.raw.wrong)
@@ -338,10 +345,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 )?.pid
 
             SchedulingAlgorithm.ROUND_ROBIN -> {
-                // For RR the optimal pick is the FIRST pid in rrQueue that exists in candidates
+                // For RR the optimal pick is the FIRST pid in rrQueuePids that exists in candidates
                 val candidatePids = candidates.map { it.pid }.toSet()
-                val nextRR = rrQueue.firstOrNull { it in candidatePids }
-                // If nothing in rrQueue matches, take earliest arrival
+                val nextRR = rrQueuePids.firstOrNull { it in candidatePids }
+                // If nothing in rrQueuePids matches, take earliest arrival
                 nextRR ?: candidates.minByOrNull { it.arrivalTime }?.pid
             }
 
@@ -357,36 +364,30 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                         .thenBy { it.arrivalTime }.thenBy { it.pid }
                 )?.pid
 
-            SchedulingAlgorithm.RR_SJF -> {
-                // RR order first; among tied-next candidates pick smallest BT
-                val candidatePids = candidates.map { it.pid }.toSet()
-                val nextRRIdx = rrQueue.indexOfFirst { it in candidatePids }
-                if (nextRRIdx < 0) {
-                    candidates.minWithOrNull(compareBy { it.burstTime })?.pid
+            SchedulingAlgorithm.SJF_RR -> {
+                // Primary: smallest burst time; tie-break: RR queue order
+                val minBT = candidates.minOf { it.burstTime }
+                val tied = candidates.filter { it.burstTime == minBT }
+                if (tied.size == 1) {
+                    tied.first().pid
                 } else {
-                    // Collect all that would be "next" in RR (same queue position ties)
-                    val nextPid = rrQueue[nextRRIdx]
-                    // In practice RR has a single next; use BT as direct tie-break on the pool
-                    candidates.filter { it.pid == nextPid }
-                        .minWithOrNull(compareBy { it.burstTime })?.pid
-                        ?: candidates.minWithOrNull(
-                            compareBy<Process> { it.burstTime }.thenBy { it.arrivalTime }
-                        )?.pid
+                    // Among tied-BT candidates, pick whoever is earliest in rrQueuePids
+                    val tiedPids = tied.map { it.pid }.toSet()
+                    rrQueuePids.firstOrNull { it in tiedPids }
+                        ?: tied.minByOrNull { it.arrivalTime }?.pid
                 }
             }
 
-            SchedulingAlgorithm.RR_Priority -> {
-                val candidatePids = candidates.map { it.pid }.toSet()
-                val nextRRIdx = rrQueue.indexOfFirst { it in candidatePids }
-                if (nextRRIdx < 0) {
-                    candidates.minWithOrNull(compareBy { it.priority })?.pid
+            SchedulingAlgorithm.Priority_RR -> {
+                // Primary: lowest priority number (highest urgency); tie-break: RR queue order
+                val minPri = candidates.minOf { it.priority }
+                val tied = candidates.filter { it.priority == minPri }
+                if (tied.size == 1) {
+                    tied.first().pid
                 } else {
-                    val nextPid = rrQueue[nextRRIdx]
-                    candidates.filter { it.pid == nextPid }
-                        .minWithOrNull(compareBy { it.priority })?.pid
-                        ?: candidates.minWithOrNull(
-                            compareBy<Process> { it.priority }.thenBy { it.arrivalTime }
-                        )?.pid
+                    val tiedPids = tied.map { it.pid }.toSet()
+                    rrQueuePids.firstOrNull { it in tiedPids }
+                        ?: tied.minByOrNull { it.arrivalTime }?.pid
                 }
             }
 
@@ -396,8 +397,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     /** True if the assigned algorithm uses Round Robin as primary key */
     fun isRRBased(): Boolean = assignedAlgorithm == SchedulingAlgorithm.ROUND_ROBIN
-            || assignedAlgorithm == SchedulingAlgorithm.RR_SJF
-            || assignedAlgorithm == SchedulingAlgorithm.RR_Priority
 
     fun dismissAlgoIntro() { showAlgoIntro = false }
     fun togglePause() { isPaused = !isPaused }
@@ -457,38 +456,44 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                         autoAdvanceIfIdle()
                         checkWinCondition()
                     } else {
-                        // For RR-based: mandatory rotation after 1 unit
                         if (isRRBased()) {
-                            val endTime = schedulingCpuStart + unitsDone
-                            ganttChart.add(
-                                GanttEntry(
-                                    pid = proc.pid, name = proc.name,
-                                    duration = 1, type = proc.type,
-                                    startTime = endTime - 1, endTime = endTime
-                                )
-                            )
-                            schedulingTime = endTime
-                            val remainingBurst = (proc.burstTime - unitsDone).coerceAtLeast(0)
-                            rrQueue.remove(proc.pid)
-                            if (remainingBurst > 0) {
-                                rrQueue.add(proc.pid)
-                                waitingProcesses.add(
-                                    proc.copy(
-                                        burstTime = remainingBurst,
-                                        state = ProcessState.WAITING,
-                                        waitTimer = 0f
+                            // RR: rotate only when the full quantum is exhausted
+                            if (unitsExecutedThisBurst >= rrQuantum) {
+                                val endTime = schedulingCpuStart + unitsDone
+                                ganttChart.add(
+                                    GanttEntry(
+                                        pid = proc.pid, name = proc.name,
+                                        duration = unitsExecutedThisBurst, type = proc.type,
+                                        startTime = schedulingCpuStart, endTime = endTime
                                     )
                                 )
-                            } else {
-                                completedProcesses.add(proc.copy(state = ProcessState.COMPLETED))
+                                schedulingTime = endTime
+                                val remainingBurst = (proc.burstTime - unitsDone).coerceAtLeast(0)
+                                rrQueuePids.remove(proc.pid)
+                                if (remainingBurst > 0) {
+                                    rrQueuePids.add(proc.pid)
+                                    waitingProcesses.add(
+                                        proc.copy(
+                                            burstTime = remainingBurst,
+                                            state = ProcessState.WAITING,
+                                            waitTimer = 0f
+                                        )
+                                    )
+                                } else {
+                                    completedProcesses.add(proc.copy(state = ProcessState.COMPLETED))
+                                }
+                                runningProcess = null
+                                cpuTimer = 0f; cpuRemainingBurst = 0; cpuBurstProgress = 0f
+                                unitsExecutedThisBurst = 0
+                                updateAvailability()
+                                // Force player to pick next in queue
+                                awaitingPreemptDecision = true
                             }
-                            runningProcess = null
-                            cpuTimer = 0f; cpuRemainingBurst = 0; cpuBurstProgress = 0f
-                            unitsExecutedThisBurst = 0
-                            updateAvailability()
+                            // Within the quantum: auto-continue, no player decision needed
+                        } else {
+                            // SJF-P / PRIORITY-P: player decides after every unit
+                            awaitingPreemptDecision = true
                         }
-                        // Pause for user decision (continue or switch)
-                        awaitingPreemptDecision = true
                     }
                 } else {
                     val fracInUnit = cpuTimer - unitsDone.toFloat()
@@ -533,7 +538,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         waitingProcesses.clear()
         waitingProcesses.addAll(updated.filter { it.pid !in expired })
         if (expired.isNotEmpty()) {
-            expired.forEach { rrQueue.remove(it) }
+            expired.forEach { rrQueuePids.remove(it) }
             lives = maxOf(0, lives - expired.size)
             score = maxOf(0, score - 50 * expired.size)
             if (lives <= 0) {
@@ -553,7 +558,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             )
         )
         completedProcesses.add(proc.copy(state = ProcessState.COMPLETED))
-        rrQueue.remove(proc.pid)
+        rrQueuePids.remove(proc.pid)
         runningProcess = null
         cpuTimer = 0f; cpuRemainingBurst = 0; cpuBurstProgress = 0f
         unitsExecutedThisBurst = 0
@@ -585,7 +590,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             )
         } else {
             completedProcesses.add(proc.copy(state = ProcessState.COMPLETED))
-            rrQueue.remove(proc.pid)
+            rrQueuePids.remove(proc.pid)
         }
         runningProcess = null
         cpuTimer = 0f; cpuRemainingBurst = 0; cpuBurstProgress = 0f
@@ -626,7 +631,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         pendingProcesses.removeAll { it.pid in arrivedPids }
         waitingProcesses.addAll(nowArrived)
         // Register new arrivals at the back of the RR queue
-        nowArrived.forEach { p -> if (p.pid !in rrQueue) rrQueue.add(p.pid) }
+        nowArrived.forEach { p -> if (p.pid !in rrQueuePids) rrQueuePids.add(p.pid) }
     }
 
     private fun spawnProcess(arrivalTime: Int) {
@@ -650,7 +655,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         pidCounter++
         if (arrivalTime <= schedulingTime) {
             waitingProcesses.add(p)
-            if (p.pid !in rrQueue) rrQueue.add(p.pid)
+            if (p.pid !in rrQueuePids) rrQueuePids.add(p.pid)
         } else {
             pendingProcesses.add(p)
         }
@@ -701,7 +706,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         pidCounter = 1; correctPicks = 0; wrongPicks = 0
         lastWrongPid = null; schedulingCpuStart = 0
         awaitingPreemptDecision = false; unitsExecutedThisBurst = 0
-        rrQueue.clear()
+        rrQueuePids.clear()
     }
 
     override fun onCleared() { super.onCleared(); gameJob?.cancel() }

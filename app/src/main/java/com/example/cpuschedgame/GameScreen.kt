@@ -69,12 +69,25 @@ fun GameScreen(
                 isPreemptive = isPreemptive,
                 awaitingDecision = viewModel.awaitingPreemptDecision,
                 isRRBased = viewModel.isRRBased(),
+                rrUnitsThisQuantum = viewModel.unitsExecutedThisBurst,
+                rrQuantum = viewModel.rrQuantum,
                 onContinue = {
                     viewModel.runningProcess?.let { proc ->
                         viewModel.scheduleProcess(proc, context)
                     }
                 }
             )
+
+            // RR queue order strip — only shown for RR-based algorithms
+            if (viewModel.isRRBased() && viewModel.rrQueuePids.isNotEmpty()) {
+                RRQueuePanel(
+                    rrQueuePids = viewModel.rrQueuePids,
+                    waitingProcesses = viewModel.waitingProcesses,
+                    runningProcess = viewModel.runningProcess,
+                    rrQuantum = viewModel.rrQuantum,
+                    unitsThisQuantum = viewModel.unitsExecutedThisBurst
+                )
+            }
 
             ReadyQueuePanel(
                 processes = viewModel.waitingProcesses,
@@ -400,6 +413,8 @@ private fun CPUPanel(
     isPreemptive: Boolean,
     awaitingDecision: Boolean,
     isRRBased: Boolean,
+    rrUnitsThisQuantum: Int,
+    rrQuantum: Int,
     onContinue: () -> Unit
 ) {
     val animProgress by animateFloatAsState(progress, tween(200), label = "cpu")
@@ -435,12 +450,48 @@ private fun CPUPanel(
             ) {
                 Text("⏱", color = WarningOrange, fontSize = 14.sp)
                 Text(
-                    if (isRRBased) "TIME UNIT DONE — Pick next process from queue!"
-                    else "TIME UNIT DONE — Continue this process or switch to another?",
+                    if (isRRBased)
+                        "QUANTUM DONE — Tap the NEXT process in the RR queue below!"
+                    else
+                        "TIME UNIT DONE — Continue this process or switch to another?",
                     color = WarningOrange, fontSize = 10.sp,
                     fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp,
                     modifier = Modifier.weight(1f)
                 )
+            }
+            Spacer(Modifier.height(5.dp))
+        }
+
+        // Quantum progress bar (RR only, while process is running)
+        if (isRRBased && running != null && !awaitingDecision && rrQuantum > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(InfoBlue.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
+                    .border(1.dp, InfoBlue.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("⌛", color = InfoBlue, fontSize = 11.sp)
+                Text(
+                    "QUANTUM: $rrUnitsThisQuantum / $rrQuantum  — rotating after $rrQuantum units",
+                    color = InfoBlue, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                // Quantum pip dots
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    repeat(rrQuantum) { i ->
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .background(
+                                    if (i < rrUnitsThisQuantum) InfoBlue else DarkBorder,
+                                    RoundedCornerShape(2.dp)
+                                )
+                        )
+                    }
+                }
             }
             Spacer(Modifier.height(5.dp))
         }
@@ -745,6 +796,114 @@ private fun ProcessCard(
                 color = urgencyColor,
                 fontSize = 14.sp, fontWeight = FontWeight.Bold
             )
+        }
+    }
+}
+
+// ── RR Queue Order Strip ──────────────────────────────────────────
+@Composable
+private fun RRQueuePanel(
+    rrQueuePids: List<Int>,
+    waitingProcesses: List<Process>,
+    runningProcess: Process?,
+    rrQuantum: Int,
+    unitsThisQuantum: Int
+) {
+    val allProcesses = waitingProcesses + listOfNotNull(runningProcess)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(InfoBlue.copy(alpha = 0.06f))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "RR QUEUE ORDER",
+                color = InfoBlue, fontSize = 9.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp
+            )
+            Text("Q=$rrQuantum units/turn", color = InfoBlue.copy(alpha = 0.6f), fontSize = 9.sp)
+            Spacer(Modifier.weight(1f))
+            Text("← picks in this order", color = TextSecondary.copy(alpha = 0.5f), fontSize = 8.sp)
+        }
+        Spacer(Modifier.height(5.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            items(rrQueuePids.size) { idx ->
+                val pid = rrQueuePids[idx]
+                val proc = allProcesses.firstOrNull { it.pid == pid }
+                val isNext = idx == 0
+                val isRunning = proc?.pid == runningProcess?.pid
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // Position label
+                    Text(
+                        if (isNext) "NEXT" else "${idx + 1}",
+                        color = if (isNext) WarningOrange else TextSecondary.copy(alpha = 0.5f),
+                        fontSize = 7.sp, fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(54.dp)
+                            .background(
+                                when {
+                                    isRunning -> GreenAccent.copy(alpha = 0.15f)
+                                    isNext    -> WarningOrange.copy(alpha = 0.12f)
+                                    else      -> DarkCard
+                                },
+                                RoundedCornerShape(6.dp)
+                            )
+                            .border(
+                                width = if (isNext || isRunning) 1.5.dp else 1.dp,
+                                color = when {
+                                    isRunning -> GreenBright.copy(alpha = 0.6f)
+                                    isNext    -> WarningOrange
+                                    else      -> DarkBorder
+                                },
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                            .padding(horizontal = 5.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "P#$pid",
+                                color = if (isNext) WarningOrange
+                                else if (isRunning) GreenBright
+                                else TextSecondary,
+                                fontSize = 9.sp, fontWeight = FontWeight.Bold
+                            )
+                            if (proc != null) {
+                                Text(
+                                    "BT:${proc.burstTime}",
+                                    color = GreenBright.copy(alpha = 0.7f),
+                                    fontSize = 8.sp
+                                )
+                            }
+                            if (isRunning && rrQuantum > 1) {
+                                // Tiny quantum pip row for the running process
+                                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    repeat(rrQuantum) { i ->
+                                        Box(
+                                            Modifier
+                                                .size(4.dp)
+                                                .background(
+                                                    if (i < unitsThisQuantum) GreenBright
+                                                    else DarkBorder,
+                                                    RoundedCornerShape(1.dp)
+                                                )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

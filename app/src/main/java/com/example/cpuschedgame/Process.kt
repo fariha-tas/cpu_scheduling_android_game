@@ -100,11 +100,14 @@ enum class SchedulingAlgorithm(
     ROUND_ROBIN(
         shortName = "RR",
         displayName = "Round\nRobin",
-        description = "Each process gets exactly 1 time unit then rotates — you control the queue!",
-        detail = "Fair CPU sharing. Each process runs for 1 time unit, then you must send the next " +
-                "process in arrival order. No starvation — every process gets a turn.",
-        hint = "Every time unit you MUST pick the NEXT process in arrival order (rotate the queue). Tap the first card in the ready queue each tick.",
-        hintShort = "Every unit: rotate to NEXT in arrival order\nNo process gets more than 1 unit in a row"
+        description = "Each process gets a fixed quantum (2–3 units), then rotates to the next in queue.",
+        detail = "Fair CPU sharing with a time quantum. Each process runs for its full quantum " +
+                "before being rotated out — no decision needed mid-quantum. After rotation, " +
+                "pick the NEXT process in queue order. No starvation — every process gets a turn.",
+        hint = "Process runs for its FULL QUANTUM automatically, then you MUST pick the NEXT " +
+                "process in the RR queue (shown below the CPU panel). Check the RR Queue strip " +
+                "to see who comes next — pick whoever is at position #1!",
+        hintShort = "Process auto-runs for full quantum\nAfter rotation: tap #1 in RR queue order"
     ),
 
     // ── Hard (hybrid preemptive) ──────────────────────────────────
@@ -124,23 +127,21 @@ enum class SchedulingAlgorithm(
         hint = "Each unit: pick LOWEST Priority number. Same priority → pick SMALLEST BT. Preempt if a more urgent process arrives!",
         hintShort = "Every unit: LOWEST Priority → tie: SMALLEST BT\nPreemptive!"
     ),
-    RR_SJF(
-        shortName = "RR+SJF",
-        displayName = "Round Robin & Shortest Job First\nScheduling",
-        description = "Round Robin with SJF tie-breaking. Preemptive per time unit.",
-        detail = "Rotate through processes in Round Robin order, but when multiple processes are " +
-                "tied in queue position, prefer the one with the smallest burst time. One unit per turn.",
-        hint = "Each unit: rotate to the NEXT process in queue. If tied for 'next', pick SMALLEST BT. Every process gets exactly 1 unit before rotating.",
-        hintShort = "Every unit: RR rotation → tie: SMALLEST BT\nPreemptive!"
+    SJF_RR(
+        shortName = "SJF+RR",
+        displayName = "Shortest Job First & Round Robin\nScheduling",
+        description = "Smallest burst time first; tie-break with RR queue order. Preemptive per time unit.",
+        detail = "Primary key: shortest remaining burst time. When multiple processes share the same burst time, fall back to Round Robin queue order as the tie-breaker. Preempt after every time unit.",
+        hint = "Each unit: pick SMALLEST BT. Same BT → pick whoever is FIRST in the RR queue. Preempt the running process if a shorter-burst one is waiting!",
+        hintShort = "Every unit: SMALLEST BT → tie: RR queue order\nPreemptive!"
     ),
-    RR_Priority(
-        shortName = "RR+PRI",
-        displayName = "Round Robin & Priority\nScheduling",
-        description = "Round Robin with Priority tie-breaking. Preemptive per time unit.",
-        detail = "Rotate through processes in Round Robin order, but when multiple processes are " +
-                "tied in queue position, prefer the highest priority (lowest number). One unit per turn.",
-        hint = "Each unit: rotate to the NEXT process in queue. If tied for 'next', pick LOWEST Priority number. Every process gets exactly 1 unit before rotating.",
-        hintShort = "Every unit: RR rotation → tie: LOWEST Priority\nPreemptive!"
+    Priority_RR(
+        shortName = "PRI+RR",
+        displayName = "Priority & Round Robin\nScheduling",
+        description = "Highest priority (P1) first; tie-break with RR queue order. Preemptive per time unit.",
+        detail = "Primary key: highest priority (lowest number). When multiple processes share the same priority, fall back to Round Robin queue order as the tie-breaker. Preempt after every time unit.",
+        hint = "Each unit: pick LOWEST Priority number. Same priority → pick whoever is FIRST in the RR queue. Preempt if a more urgent process arrives!",
+        hintShort = "Every unit: LOWEST Priority → tie: RR queue order\nPreemptive!"
     )
 }
 
